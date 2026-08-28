@@ -5,6 +5,8 @@
   const USER_API_KEY_SESSION = "fortniteAiAgent.groqKey.session";
   const LOGIN_MODE_SESSION = "fortniteAiAgent.loginMode.session";
   const GROQ_KEYS_URL = "https://console.groq.com/keys";
+  const TH3DRY_ASSET_URL = "https://th3dryz69.github.io/FortniteToolsWeb/public/data/fortnite_assets.gz";
+  const GENERATED_FILE_NAME = "Subscribe to my YT channel @27lf.txt";
   const DISCORD_USERNAME = "@its.swag";
   const DISCORD_PROFILE_URL = null;
 
@@ -36,6 +38,7 @@
   let activeId = localStorage.getItem(ACTIVE_KEY) || null;
   let busy = false;
   let toastTimer = null;
+  let th3dryAssetsPromise = null;
 
   if (!activeId || !chats[activeId]) activeId = createChat(false);
   renderAll();
@@ -109,7 +112,7 @@
 
   function titleFromMessage(text) {
     const clean = text.replace(/\s+/g, " ").trim();
-    return clean.length > 42 ? `${clean.slice(0, 42)}…` : clean || "New chat";
+    return clean.length > 42 ? `${clean.slice(0, 42)}â¦` : clean || "New chat";
   }
 
   function renderAll() {
@@ -185,6 +188,11 @@
     renderMarkdown(content, message.content);
 
     wrap.append(name, content);
+
+    if (message.attachment && message.attachment.content) {
+      appendGeneratedFile(wrap, message.attachment);
+    }
+
     outer.appendChild(wrap);
     return outer;
   }
@@ -497,12 +505,25 @@
     scrollToBottom();
 
     try {
+      const th3drySearch = await searchTh3dryForMessage(text);
+
       const response = await fetch(API_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: chat.messages,
-          apiKey: sessionStorage.getItem(USER_API_KEY_SESSION) || null
+          apiKey: sessionStorage.getItem(USER_API_KEY_SESSION) || null,
+          th3drySearch: th3drySearch
+            ? {
+                searched: true,
+                queryTokens: th3drySearch.queryTokens,
+                total: th3drySearch.total,
+                exact: th3drySearch.exact.slice(0, 60),
+                related: th3drySearch.related.slice(0, 60),
+                largeResultFile: th3drySearch.makeFile,
+                unavailable: th3drySearch.unavailable === true
+              }
+            : null
         })
       });
 
@@ -512,10 +533,20 @@
         throw new Error(data.error || `Request failed (${response.status})`);
       }
 
-      chat.messages.push({
+      const assistantMessage = {
         role: "assistant",
         content: String(data.reply || "").trim()
-      });
+      };
+
+      if (th3drySearch?.makeFile && th3drySearch?.allMatches?.length) {
+        assistantMessage.attachment = {
+          name: GENERATED_FILE_NAME,
+          mime: "text/plain;charset=utf-8",
+          content: th3drySearch.allMatches.join("\n")
+        };
+      }
+
+      chat.messages.push(assistantMessage);
 
       chat.updatedAt = Date.now();
       saveChats();
@@ -602,6 +633,189 @@
   }
 
 
+
+  function shouldSearchTh3dry(text) {
+    return /(?:asset|path|mesh|material|texture|sound|cue|wave|uasset|uexp|ubulk|pak|ucas|utoc|fmodel|unreleased|removed|files?|folder|plugin|gamefeatures|athena|creative|stw|fortnite|ÙØ³Ø§Ø±|Ø¨Ø§Ø«|ÙÙØ´|ÙØ§ØªÙØ±ÙØ§Ù|ØªÙØ³ØªØ´Ø±|ØµÙØª|ÙÙÙØ§Øª|ÙØ§ÙÙ|Ø§ØµÙ|Ø£ØµÙ|Ø§ØµÙÙ|Ø£ØµÙÙ)/i.test(String(text || ""));
+  }
+
+  function extractAssetSearchTokens(text) {
+    const stopWords = new Set([
+      "the","a","an","is","are","was","were","do","does","did","can","could","would",
+      "you","u","me","my","i","we","they","it","this","that","these","those","for","from",
+      "of","to","in","on","at","with","and","or","but","about","find","search","look","give",
+      "get","show","path","paths","asset","assets","file","files","folder","fortnite","fmodel",
+      "please","pls","plz","what","where","which","any","all","new","old",
+      "Ø´ÙÙ","Ø´ÙÙÙ","Ø´ÙÙÙ","ÙÙÙ","Ø§ÙÙ","Ø£ÙÙ","Ø§Ø±ÙØ¯","Ø£Ø±ÙØ¯","Ø¯ÙØ±","Ø¯ÙØ±ÙÙ","Ø§Ø¨Ø­Ø«","Ø§Ø¨Ø­Ø«ÙÙ",
+      "Ø¹ÙÙ","Ø¹Ù","ÙÙ","ÙÙ","Ø§ÙÙ","Ø¥ÙÙ","ÙØ§Ù","ÙØ§ÙØª","ÙØ§Ø°Ø§","ÙØ°Ø§","ÙØ§Ù","ÙÙ","ÙÙ","Ø§ÙÙ","Ø§ÙÙÙ",
+      "Ø¨Ø§Ø«","ÙØ³Ø§Ø±","ÙÙÙ","ÙÙÙØ§Øª","ÙÙØ±ØªÙØ§ÙØª"
+    ]);
+
+    return [...new Set(
+      String(text || "")
+        .toLowerCase()
+        .replace(/https?:\/\/\S+/g, " ")
+        .replace(/[\\`*_~()[\]{}<>|:;,.!?'"=+]/g, " ")
+        .split(/\s+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 2 && !stopWords.has(token))
+    )].slice(0, 6);
+  }
+
+  async function loadTh3dryAssets() {
+    if (th3dryAssetsPromise) return th3dryAssetsPromise;
+
+    th3dryAssetsPromise = (async () => {
+      if (typeof DecompressionStream !== "function") {
+        throw new Error("Gzip decompression is not supported in this browser.");
+      }
+
+      const response = await fetch(TH3DRY_ASSET_URL, { cache: "force-cache" });
+      if (!response.ok) {
+        throw new Error(`Th3Dry database returned ${response.status}.`);
+      }
+
+      const buffer = await response.arrayBuffer();
+      const stream = new Blob([buffer])
+        .stream()
+        .pipeThrough(new DecompressionStream("gzip"));
+
+      const text = await new Response(stream).text();
+
+      return text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+    })().catch((error) => {
+      th3dryAssetsPromise = null;
+      console.warn("Th3Dry database search unavailable:", error);
+      throw error;
+    });
+
+    return th3dryAssetsPromise;
+  }
+
+  function scoreRelatedPath(path, tokens) {
+    const lower = path.toLowerCase();
+    const fileName = lower.slice(lower.lastIndexOf("/") + 1);
+    let score = 0;
+
+    for (const token of tokens) {
+      if (lower.includes(token)) score += Math.max(2, token.length);
+      if (fileName.includes(token)) score += token.length * 2;
+    }
+
+    return score;
+  }
+
+  async function searchTh3dryForMessage(text) {
+    if (!shouldSearchTh3dry(text)) return null;
+
+    const queryTokens = extractAssetSearchTokens(text);
+    if (!queryTokens.length) return null;
+
+    try {
+      const assets = await loadTh3dryAssets();
+      const exact = [];
+      const relatedScored = [];
+
+      for (const path of assets) {
+        const lower = path.toLowerCase();
+        let matchedCount = 0;
+
+        for (const token of queryTokens) {
+          if (lower.includes(token)) matchedCount++;
+        }
+
+        if (matchedCount === queryTokens.length) {
+          exact.push(path);
+        } else if (matchedCount > 0) {
+          relatedScored.push({
+            path,
+            matchedCount,
+            score: scoreRelatedPath(path, queryTokens)
+          });
+        }
+      }
+
+      relatedScored.sort((a, b) =>
+        b.matchedCount - a.matchedCount ||
+        b.score - a.score ||
+        a.path.length - b.path.length
+      );
+
+      const related = relatedScored
+        .slice(0, 300)
+        .map((item) => item.path)
+        .filter((path) => !exact.includes(path));
+
+      const allMatches = exact.length ? [...exact, ...related] : related;
+
+      return {
+        queryTokens,
+        total: allMatches.length,
+        exact,
+        related,
+        allMatches,
+        makeFile: allMatches.length >= 120,
+        unavailable: false
+      };
+    } catch {
+      return {
+        queryTokens,
+        total: 0,
+        exact: [],
+        related: [],
+        allMatches: [],
+        makeFile: false,
+        unavailable: true
+      };
+    }
+  }
+
+  function appendGeneratedFile(parent, attachment) {
+    const card = document.createElement("div");
+    card.className = "generated-file-card";
+
+    const icon = document.createElement("div");
+    icon.className = "generated-file-icon";
+    icon.textContent = "TXT";
+
+    const meta = document.createElement("div");
+    meta.className = "generated-file-meta";
+
+    const name = document.createElement("div");
+    name.className = "generated-file-name";
+    name.textContent = GENERATED_FILE_NAME;
+
+    const type = document.createElement("div");
+    type.className = "generated-file-type";
+    type.textContent = "Text file";
+
+    meta.append(name, type);
+
+    const download = document.createElement("button");
+    download.type = "button";
+    download.className = "generated-file-download";
+    download.textContent = "Download";
+
+    download.addEventListener("click", () => {
+      const blob = new Blob([attachment.content], {
+        type: attachment.mime || "text/plain;charset=utf-8"
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = GENERATED_FILE_NAME;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    });
+
+    card.append(icon, meta, download);
+    parent.appendChild(card);
+  }
+
   function maybeShowLoginGate() {
     const mode = sessionStorage.getItem(LOGIN_MODE_SESSION);
 
@@ -671,7 +885,7 @@
     const back = document.createElement("button");
     back.type = "button";
     back.className = "login-back";
-    back.textContent = "←";
+    back.textContent = "â";
     back.setAttribute("aria-label", "Back");
     back.addEventListener("click", openWelcomeGate);
 
@@ -709,7 +923,7 @@
 
     const help = document.createElement("p");
     help.className = "api-help";
-    help.append("u don’t have a api? create one for free from: ");
+    help.append("u donât have a api? create one for free from: ");
 
     const link = document.createElement("a");
     link.href = GROQ_KEYS_URL;
@@ -978,6 +1192,64 @@
 
       .guest-login-banner:active {
         transform: translateX(-50%) scale(.98);
+      }
+
+
+      .generated-file-card {
+        width: min(520px, 100%);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 14px;
+        padding: 12px;
+        border: 1px solid #2d2d2d;
+        border-radius: 14px;
+        background: #171717;
+      }
+
+      .generated-file-icon {
+        width: 42px;
+        height: 42px;
+        flex: 0 0 42px;
+        display: grid;
+        place-items: center;
+        border-radius: 10px;
+        background: #242424;
+        color: #ededed;
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .generated-file-meta {
+        min-width: 0;
+        flex: 1;
+      }
+
+      .generated-file-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #f0f0f0;
+        font-size: 13px;
+        font-weight: 650;
+      }
+
+      .generated-file-type {
+        margin-top: 2px;
+        color: #777;
+        font-size: 11px;
+      }
+
+      .generated-file-download {
+        min-height: 36px;
+        padding: 0 12px;
+        border: 1px solid #353535;
+        border-radius: 10px;
+        background: #222;
+        color: #f2f2f2;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 650;
       }
 
       @media (max-width: 520px) {
