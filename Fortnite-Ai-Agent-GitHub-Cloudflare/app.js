@@ -2,6 +2,9 @@
   "use strict";
 
   const API_ENDPOINT = window.FORTNITE_AI_API_ENDPOINT || "";
+  const USER_API_KEY_SESSION = "fortniteAiAgent.groqKey.session";
+  const LOGIN_MODE_SESSION = "fortniteAiAgent.loginMode.session";
+  const GROQ_KEYS_URL = "https://console.groq.com/keys";
   const DISCORD_USERNAME = "@its.swag";
   const DISCORD_PROFILE_URL = null;
 
@@ -9,6 +12,7 @@
   const ACTIVE_KEY = "fortniteAiAgent.active.v1";
 
   injectMarkdownStyles();
+  injectLoginStyles();
 
   const els = {
     sidebar: document.getElementById("sidebar"),
@@ -35,6 +39,7 @@
 
   if (!activeId || !chats[activeId]) activeId = createChat(false);
   renderAll();
+  maybeShowLoginGate();
 
   els.openSidebar.addEventListener("click", openSidebar);
   els.closeSidebar.addEventListener("click", closeSidebar);
@@ -162,8 +167,8 @@
 
     if (message.role === "user") {
       const bubble = document.createElement("div");
-      bubble.className = "user-bubble";
-      bubble.textContent = message.content;
+      bubble.className = "user-bubble markdown-body user-markdown";
+      renderMarkdown(bubble, message.content);
       outer.appendChild(bubble);
       return outer;
     }
@@ -210,7 +215,20 @@
       const line = lines[i];
 
       if (/^```/.test(line)) {
-        const language = line.replace(/^```/, "").trim() || "code";
+        // Supports both:
+        // ```js
+        // code
+        // ```
+        // and: ```code```
+        const sameLine = line.match(/^```([^`\n]*)```$/);
+
+        if (sameLine) {
+          appendCodeBlock(container, sameLine[1], "Plain text");
+          i++;
+          continue;
+        }
+
+        const language = line.replace(/^```/, "").trim() || "Plain text";
         const codeLines = [];
         i++;
 
@@ -482,7 +500,10 @@
       const response = await fetch(API_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: chat.messages })
+        body: JSON.stringify({
+          messages: chat.messages,
+          apiKey: sessionStorage.getItem(USER_API_KEY_SESSION) || null
+        })
       });
 
       const data = await response.json().catch(() => ({}));
@@ -580,6 +601,159 @@
     }
   }
 
+
+  function maybeShowLoginGate() {
+    const mode = sessionStorage.getItem(LOGIN_MODE_SESSION);
+    if (mode === "guest" || mode === "api") return;
+    openWelcomeGate();
+  }
+
+  function openWelcomeGate() {
+    removeLoginGate();
+
+    const overlay = document.createElement("div");
+    overlay.className = "login-gate";
+    overlay.id = "loginGate";
+
+    const card = document.createElement("section");
+    card.className = "login-card login-card-welcome";
+
+    const title = document.createElement("h1");
+    title.textContent = "Welcome to Fortnite Ai Agent";
+
+    const sub = document.createElement("p");
+    sub.className = "login-sub";
+    sub.textContent = "Choose how you want to use the agent.";
+
+    const loginBtn = document.createElement("button");
+    loginBtn.type = "button";
+    loginBtn.className = "login-primary";
+    loginBtn.textContent = "Log in";
+    loginBtn.addEventListener("click", openApiLogin);
+
+    const guestBtn = document.createElement("button");
+    guestBtn.type = "button";
+    guestBtn.className = "login-secondary";
+    guestBtn.textContent = "Guest";
+    guestBtn.addEventListener("click", () => {
+      sessionStorage.removeItem(USER_API_KEY_SESSION);
+      sessionStorage.setItem(LOGIN_MODE_SESSION, "guest");
+      removeLoginGate();
+    });
+
+    const guestInfo = document.createElement("p");
+    guestInfo.className = "guest-info";
+    guestInfo.textContent =
+      "Guest uses the public API limit. It can run out quickly and may already be unavailable, so the AI might not reply.";
+
+    card.append(title, sub, loginBtn, guestBtn, guestInfo);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+  }
+
+  function openApiLogin() {
+    removeLoginGate();
+
+    const overlay = document.createElement("div");
+    overlay.className = "login-gate";
+    overlay.id = "loginGate";
+
+    const card = document.createElement("section");
+    card.className = "login-card";
+
+    const back = document.createElement("button");
+    back.type = "button";
+    back.className = "login-back";
+    back.textContent = "←";
+    back.setAttribute("aria-label", "Back");
+    back.addEventListener("click", openWelcomeGate);
+
+    const title = document.createElement("h1");
+    title.textContent = "Type ur API";
+
+    const inputWrap = document.createElement("div");
+    inputWrap.className = "api-input-wrap";
+
+    const input = document.createElement("input");
+    input.type = "password";
+    input.inputMode = "text";
+    input.autocomplete = "off";
+    input.autocapitalize = "none";
+    input.spellcheck = false;
+    input.placeholder = "gsk_...";
+    input.setAttribute("aria-label", "Groq API key");
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "api-toggle";
+    toggle.textContent = "Show";
+    toggle.addEventListener("click", () => {
+      const isHidden = input.type === "password";
+      input.type = isHidden ? "text" : "password";
+      toggle.textContent = isHidden ? "Hide" : "Show";
+    });
+
+    inputWrap.append(input, toggle);
+
+    const continueBtn = document.createElement("button");
+    continueBtn.type = "button";
+    continueBtn.className = "login-primary";
+    continueBtn.textContent = "Continue";
+
+    const help = document.createElement("p");
+    help.className = "api-help";
+    help.append("u don’t have a api? create one for free from: ");
+
+    const link = document.createElement("a");
+    link.href = GROQ_KEYS_URL;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Groq API";
+    help.appendChild(link);
+
+    const privacy = document.createElement("p");
+    privacy.className = "api-privacy";
+    privacy.textContent =
+      "Your key is kept only for this browser session and is not saved to your chat history.";
+
+    function submitKey() {
+      const key = input.value.trim();
+
+      if (!key) {
+        input.focus();
+        showToast("Type your Groq API key first.", true);
+        return;
+      }
+
+      if (!key.startsWith("gsk_")) {
+        showToast("That doesn't look like a Groq API key.", true);
+        input.focus();
+        return;
+      }
+
+      sessionStorage.setItem(USER_API_KEY_SESSION, key);
+      sessionStorage.setItem(LOGIN_MODE_SESSION, "api");
+      removeLoginGate();
+      showToast("Logged in with your Groq API key.");
+      els.input.focus();
+    }
+
+    continueBtn.addEventListener("click", submitKey);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") submitKey();
+    });
+
+    card.append(back, title, inputWrap, continueBtn, help, privacy);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    setTimeout(() => input.focus(), 50);
+  }
+
+  function removeLoginGate() {
+    document.getElementById("loginGate")?.remove();
+  }
+
   function showToast(message, isError = false) {
     clearTimeout(toastTimer);
     els.toast.textContent = message;
@@ -589,6 +763,185 @@
     toastTimer = setTimeout(() => {
       els.toast.classList.remove("show");
     }, 2800);
+  }
+
+
+  function injectLoginStyles() {
+    if (document.getElementById("fortnite-ai-login-styles")) return;
+
+    const style = document.createElement("style");
+    style.id = "fortnite-ai-login-styles";
+    style.textContent = `
+      .login-gate {
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        display: grid;
+        place-items: center;
+        padding:
+          max(22px, env(safe-area-inset-top))
+          max(18px, env(safe-area-inset-right))
+          max(22px, env(safe-area-inset-bottom))
+          max(18px, env(safe-area-inset-left));
+        background: rgba(5, 5, 5, .98);
+        overflow-y: auto;
+      }
+
+      .login-card {
+        position: relative;
+        width: min(420px, 100%);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 28px 22px 24px;
+        border: 1px solid #272727;
+        border-radius: 24px;
+        background: #101010;
+        box-shadow: 0 24px 80px rgba(0,0,0,.34);
+      }
+
+      .login-card-welcome {
+        text-align: center;
+      }
+
+      .login-card h1 {
+        margin: 0 0 2px;
+        font-size: clamp(25px, 7vw, 34px);
+        line-height: 1.12;
+        letter-spacing: -.03em;
+      }
+
+      .login-sub {
+        margin: 0 0 12px;
+        color: #999;
+        line-height: 1.45;
+      }
+
+      .login-primary,
+      .login-secondary {
+        width: 100%;
+        min-height: 50px;
+        border-radius: 14px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .login-primary {
+        border: 0;
+        background: #f2f2f2;
+        color: #0b0b0b;
+      }
+
+      .login-primary:active {
+        transform: scale(.99);
+      }
+
+      .login-secondary {
+        border: 1px solid #343434;
+        background: #181818;
+        color: #f1f1f1;
+      }
+
+      .guest-info,
+      .api-help,
+      .api-privacy {
+        margin: 2px 2px 0;
+        color: #8c8c8c;
+        font-size: 12.5px;
+        line-height: 1.5;
+      }
+
+      .guest-info {
+        text-align: left;
+      }
+
+      .login-back {
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        margin: -6px 0 2px -6px;
+        padding: 0;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        color: #f2f2f2;
+        font-size: 24px;
+        cursor: pointer;
+      }
+
+      .login-back:hover {
+        background: #191919;
+      }
+
+      .api-input-wrap {
+        min-height: 54px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 8px 0 15px;
+        border: 1px solid #343434;
+        border-radius: 15px;
+        background: #181818;
+      }
+
+      .api-input-wrap:focus-within {
+        border-color: #555;
+      }
+
+      .api-input-wrap input {
+        min-width: 0;
+        flex: 1;
+        border: 0;
+        outline: 0;
+        background: transparent;
+        color: #f4f4f4;
+        font: 15px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .api-input-wrap input::placeholder {
+        color: #6f6f6f;
+      }
+
+      .api-toggle {
+        min-width: 50px;
+        height: 36px;
+        border: 0;
+        border-radius: 9px;
+        background: #242424;
+        color: #d8d8d8;
+        cursor: pointer;
+        font-size: 12px;
+      }
+
+      .api-help a {
+        color: #e9e9e9;
+        font-weight: 700;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+
+      .api-privacy {
+        color: #686868;
+      }
+
+      @media (max-width: 520px) {
+        .login-gate {
+          align-items: end;
+          padding-left: 10px;
+          padding-right: 10px;
+          padding-bottom: max(10px, env(safe-area-inset-bottom));
+        }
+
+        .login-card {
+          width: 100%;
+          border-radius: 24px 24px 18px 18px;
+          padding: 26px 18px 22px;
+        }
+      }
+    `;
+
+    document.head.appendChild(style);
   }
 
   function injectMarkdownStyles() {
@@ -668,6 +1021,19 @@
         color: #d8e7ff;
         text-decoration: underline;
         text-underline-offset: 3px;
+      }
+
+      .user-markdown p {
+        margin: 0;
+      }
+
+      .user-markdown .chatgpt-code-block {
+        margin: 6px 0;
+        background: #202020;
+      }
+
+      .user-markdown .chatgpt-code-block pre {
+        background: #202020;
       }
 
       .markdown-body .inline-code {
