@@ -1,0 +1,15 @@
+{
+  "name": "fortnite-ai-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "openai": "^7.5.0"
+  },
+  "devDependencies": {
+    "vercel": "^59.7.0"
+  }
+}
