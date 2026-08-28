@@ -685,6 +685,7 @@
 
 
 
+
   function updatePluginMenu() {
     const value = els.input.value;
     const caret = els.input.selectionStart ?? value.length;
@@ -697,19 +698,44 @@
     }
 
     const query = String(match[2] || "").toLowerCase();
-    const matches = PLUGINS.filter((plugin) =>
+
+    const visiblePlugins = PLUGINS.filter((plugin) =>
+      !query ||
       plugin.label.toLowerCase().includes(query) ||
       plugin.command.toLowerCase().includes(`@${query}`)
     );
 
-    if (!matches.length) {
+    if (!visiblePlugins.length) {
       pluginMenu.hidden = true;
       return;
     }
 
     pluginMenu.textContent = "";
 
-    matches.forEach((plugin, index) => {
+    const header = document.createElement("div");
+    header.className = "plugin-panel-header";
+
+    const title = document.createElement("strong");
+    title.textContent = "Plugins";
+
+    const settings = document.createElement("button");
+    settings.type = "button";
+    settings.className = "plugin-settings";
+    settings.setAttribute("aria-label", "Plugin settings");
+    settings.innerHTML = `
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 7h7m4 0h5M4 17h3m4 0h9M11 4v6m-4 4v6m8-16v6m-4 4v6"
+          fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="11" cy="7" r="2" fill="currentColor"/>
+        <circle cx="7" cy="17" r="2" fill="currentColor"/>
+        <circle cx="15" cy="7" r="2" fill="currentColor"/>
+      </svg>
+    `;
+
+    header.append(title, settings);
+    pluginMenu.appendChild(header);
+
+    visiblePlugins.forEach((plugin, index) => {
       const button = document.createElement("button");
       button.type = "button";
       button.className = `plugin-option${index === 0 ? " selected" : ""}`;
@@ -717,19 +743,13 @@
 
       const icon = document.createElement("span");
       icon.className = "plugin-icon";
-      icon.textContent = "@";
+      icon.textContent = "ð";
 
-      const info = document.createElement("span");
-      info.className = "plugin-info";
-
-      const title = document.createElement("strong");
+      const title = document.createElement("span");
+      title.className = "plugin-title";
       title.textContent = plugin.label;
 
-      const desc = document.createElement("small");
-      desc.textContent = "Search Th3Dry Fortnite asset database";
-
-      info.append(title, desc);
-      button.append(icon, info);
+      button.append(icon, title);
 
       button.addEventListener("mousedown", (event) => {
         event.preventDefault();
@@ -740,19 +760,35 @@
     });
 
     pluginMenu.hidden = false;
-    positionPluginMenu();
+    requestAnimationFrame(positionPluginMenu);
   }
+
 
   function positionPluginMenu() {
     if (pluginMenu.hidden) return;
 
-    const rect = els.input.getBoundingClientRect();
-    const gap = 10;
-    const maxWidth = Math.min(420, window.innerWidth - 20);
+    const composerRect = els.composer.getBoundingClientRect();
+    const margin = 12;
+    const width = Math.min(
+      520,
+      window.innerWidth - margin * 2
+    );
 
-    pluginMenu.style.width = `${Math.min(rect.width, maxWidth)}px`;
-    pluginMenu.style.left = `${Math.max(10, Math.min(rect.left, window.innerWidth - maxWidth - 10))}px`;
-    pluginMenu.style.top = `${Math.max(10, rect.top - pluginMenu.offsetHeight - gap)}px`;
+    pluginMenu.style.width = `${width}px`;
+
+    const left = Math.max(
+      margin,
+      Math.min(
+        composerRect.left,
+        window.innerWidth - width - margin
+      )
+    );
+
+    const desiredTop =
+      composerRect.top - pluginMenu.offsetHeight - 10;
+
+    pluginMenu.style.left = `${left}px`;
+    pluginMenu.style.top = `${Math.max(10, desiredTop)}px`;
   }
 
   function movePluginSelection(direction) {
@@ -1428,70 +1464,120 @@
 
 
 
+
       .plugin-menu {
         position: fixed;
         z-index: 9800;
-        max-height: 260px;
+        max-height: min(430px, 55vh);
         overflow-y: auto;
-        padding: 6px;
-        border: 1px solid #303030;
-        border-radius: 14px;
-        background: rgba(20, 20, 20, .98);
-        box-shadow: 0 18px 55px rgba(0, 0, 0, .38);
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
+        padding: 10px;
+        border: 1px solid #3a3a3a;
+        border-radius: 24px;
+        background: rgba(12, 12, 12, .985);
+        box-shadow: 0 20px 65px rgba(0, 0, 0, .48);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
       }
 
       .plugin-menu[hidden] {
         display: none !important;
       }
 
-      .plugin-option {
-        width: 100%;
+      .plugin-panel-header {
         display: flex;
         align-items: center;
-        gap: 10px;
-        padding: 10px;
+        justify-content: space-between;
+        min-height: 52px;
+        padding: 0 10px 2px 12px;
+      }
+
+      .plugin-panel-header strong {
+        color: #f3f3f3;
+        font-size: 17px;
+        font-weight: 750;
+        letter-spacing: -.02em;
+      }
+
+      .plugin-settings {
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        padding: 0;
         border: 0;
         border-radius: 10px;
+        background: transparent;
+        color: #bcbcbc;
+        cursor: default;
+      }
+
+      .plugin-settings svg {
+        width: 22px;
+        height: 22px;
+      }
+
+      .plugin-option {
+        width: 100%;
+        min-height: 66px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 0 16px;
+        border: 0;
+        border-radius: 18px;
         background: transparent;
         color: #f3f3f3;
         text-align: left;
         cursor: pointer;
       }
 
+      .plugin-option + .plugin-option {
+        margin-top: 2px;
+      }
+
       .plugin-option:hover,
       .plugin-option.selected {
-        background: #2a2a2a;
+        background: #252525;
       }
 
       .plugin-icon {
-        width: 34px;
-        height: 34px;
-        flex: 0 0 34px;
+        width: 38px;
+        height: 38px;
+        flex: 0 0 38px;
         display: grid;
         place-items: center;
-        border: 1px solid #3a3a3a;
-        border-radius: 9px;
-        background: #202020;
-        font-weight: 800;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        font-size: 24px;
+        line-height: 1;
       }
 
-      .plugin-info {
+      .plugin-title {
         min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-
-      .plugin-info strong {
-        font-size: 13px;
+        color: #f3f3f3;
+        font-size: 18px;
         font-weight: 700;
+        line-height: 1.2;
       }
 
-      .plugin-info small {
-        color: #8b8b8b;
-        font-size: 11px;
+      @media (max-width: 520px) {
+        .plugin-menu {
+          width: calc(100vw - 24px) !important;
+          max-height: min(420px, 48vh);
+          border-radius: 24px;
+          padding: 8px;
+        }
+
+        .plugin-option {
+          min-height: 64px;
+          padding: 0 14px;
+          border-radius: 17px;
+        }
+
+        .plugin-title {
+          font-size: 17px;
+        }
       }
 
       .generated-file-card {
