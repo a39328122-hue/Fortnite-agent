@@ -604,7 +604,13 @@
 
   function maybeShowLoginGate() {
     const mode = sessionStorage.getItem(LOGIN_MODE_SESSION);
-    if (mode === "guest" || mode === "api") return;
+
+    if (mode === "guest") {
+      showGuestLoginBanner();
+      return;
+    }
+
+    if (mode === "api") return;
     openWelcomeGate();
   }
 
@@ -639,6 +645,7 @@
       sessionStorage.removeItem(USER_API_KEY_SESSION);
       sessionStorage.setItem(LOGIN_MODE_SESSION, "guest");
       removeLoginGate();
+      showGuestLoginBanner();
     });
 
     const guestInfo = document.createElement("p");
@@ -734,6 +741,7 @@
       sessionStorage.setItem(USER_API_KEY_SESSION, key);
       sessionStorage.setItem(LOGIN_MODE_SESSION, "api");
       removeLoginGate();
+      removeGuestLoginBanner();
       showToast("Logged in with your Groq API key.");
       els.input.focus();
     }
@@ -748,6 +756,27 @@
     document.body.appendChild(overlay);
 
     setTimeout(() => input.focus(), 50);
+  }
+
+
+  function showGuestLoginBanner() {
+    if (document.getElementById("guestLoginBanner")) return;
+
+    const banner = document.createElement("button");
+    banner.type = "button";
+    banner.id = "guestLoginBanner";
+    banner.className = "guest-login-banner";
+    banner.textContent = "Log in for free";
+
+    banner.addEventListener("click", () => {
+      openApiLogin();
+    });
+
+    document.body.appendChild(banner);
+  }
+
+  function removeGuestLoginBanner() {
+    document.getElementById("guestLoginBanner")?.remove();
   }
 
   function removeLoginGate() {
@@ -923,6 +952,32 @@
 
       .api-privacy {
         color: #686868;
+      }
+
+
+      .guest-login-banner {
+        position: fixed;
+        top: max(10px, env(safe-area-inset-top));
+        left: 50%;
+        z-index: 9500;
+        transform: translateX(-50%);
+        min-height: 38px;
+        padding: 0 16px;
+        border: 1px solid #3a3a3a;
+        border-radius: 999px;
+        background: rgba(20, 20, 20, .96);
+        color: #f3f3f3;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: -.01em;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, .28);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        cursor: pointer;
+      }
+
+      .guest-login-banner:active {
+        transform: translateX(-50%) scale(.98);
       }
 
       @media (max-width: 520px) {
