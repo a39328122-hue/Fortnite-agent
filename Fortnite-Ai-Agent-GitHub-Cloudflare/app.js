@@ -7,6 +7,9 @@
   const GROQ_KEYS_URL = "https://console.groq.com/keys";
   const TH3DRY_ASSET_URL = "https://th3dryz69.github.io/FortniteToolsWeb/public/data/fortnite_assets.gz";
   const GENERATED_FILE_NAME = "Subscribe to my YT channel @27lf.txt";
+  const PLUGINS = [
+    { id: "fortnite-files", label: "Search in Fortnite Files", command: "@Search in Fortnite Files" }
+  ];
   const DISCORD_USERNAME = "@its.swag";
   const DISCORD_PROFILE_URL = null;
 
@@ -33,6 +36,12 @@
     send: document.getElementById("sendButton"),
     toast: document.getElementById("toast")
   };
+
+  const pluginMenu = document.createElement("div");
+  pluginMenu.id = "pluginMenu";
+  pluginMenu.className = "plugin-menu";
+  pluginMenu.hidden = true;
+  document.body.appendChild(pluginMenu);
 
   let chats = loadChats();
   let activeId = localStorage.getItem(ACTIVE_KEY) || null;
@@ -61,9 +70,32 @@
   els.input.addEventListener("input", () => {
     resizeTextarea();
     updateSendState();
+    updatePluginMenu();
   });
 
   els.input.addEventListener("keydown", (event) => {
+    if (!pluginMenu.hidden) {
+      if (event.key === "Escape") {
+        pluginMenu.hidden = true;
+        return;
+      }
+
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        movePluginSelection(event.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+        const selected = pluginMenu.querySelector(".plugin-option.selected");
+        if (selected) {
+          event.preventDefault();
+          selectPlugin(selected.dataset.command || "");
+          return;
+        }
+      }
+    }
+
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       if (!els.send.disabled) els.composer.requestSubmit();
@@ -74,6 +106,18 @@
     event.preventDefault();
     await sendMessage();
   });
+
+  document.addEventListener("click", (event) => {
+    if (
+      !pluginMenu.hidden &&
+      !pluginMenu.contains(event.target) &&
+      event.target !== els.input
+    ) {
+      pluginMenu.hidden = true;
+    }
+  });
+
+  window.addEventListener("resize", positionPluginMenu);
 
   function loadChats() {
     try {
@@ -487,6 +531,7 @@
     const text = els.input.value.trim();
     if (!text) return;
 
+    const pluginRequest = parsePluginRequest(text);
     const chat = currentChat();
 
     if (!chat.messages.length) {
@@ -503,6 +548,11 @@
     setBusy(true);
     addTypingIndicator();
     scrollToBottom();
+
+    if (pluginRequest?.id === "fortnite-files") {
+      await runFortniteFilesPlugin(chat, pluginRequest.query);
+      return;
+    }
 
     try {
       const th3drySearch = await searchTh3dryForMessage(text);
@@ -633,6 +683,188 @@
   }
 
 
+
+
+  function updatePluginMenu() {
+    const value = els.input.value;
+    const caret = els.input.selectionStart ?? value.length;
+    const beforeCaret = value.slice(0, caret);
+    const match = beforeCaret.match(/(^|\s)@([^\s]*)$/);
+
+    if (!match) {
+      pluginMenu.hidden = true;
+      return;
+    }
+
+    const query = String(match[2] || "").toLowerCase();
+    const matches = PLUGINS.filter((plugin) =>
+      plugin.label.toLowerCase().includes(query) ||
+      plugin.command.toLowerCase().includes(`@${query}`)
+    );
+
+    if (!matches.length) {
+      pluginMenu.hidden = true;
+      return;
+    }
+
+    pluginMenu.textContent = "";
+
+    matches.forEach((plugin, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `plugin-option${index === 0 ? " selected" : ""}`;
+      button.dataset.command = plugin.command;
+
+      const icon = document.createElement("span");
+      icon.className = "plugin-icon";
+      icon.textContent = "@";
+
+      const info = document.createElement("span");
+      info.className = "plugin-info";
+
+      const title = document.createElement("strong");
+      title.textContent = plugin.label;
+
+      const desc = document.createElement("small");
+      desc.textContent = "Search Th3Dry Fortnite asset database";
+
+      info.append(title, desc);
+      button.append(icon, info);
+
+      button.addEventListener("mousedown", (event) => {
+        event.preventDefault();
+        selectPlugin(plugin.command);
+      });
+
+      pluginMenu.appendChild(button);
+    });
+
+    pluginMenu.hidden = false;
+    positionPluginMenu();
+  }
+
+  function positionPluginMenu() {
+    if (pluginMenu.hidden) return;
+
+    const rect = els.input.getBoundingClientRect();
+    const gap = 10;
+    const maxWidth = Math.min(420, window.innerWidth - 20);
+
+    pluginMenu.style.width = `${Math.min(rect.width, maxWidth)}px`;
+    pluginMenu.style.left = `${Math.max(10, Math.min(rect.left, window.innerWidth - maxWidth - 10))}px`;
+    pluginMenu.style.top = `${Math.max(10, rect.top - pluginMenu.offsetHeight - gap)}px`;
+  }
+
+  function movePluginSelection(direction) {
+    const options = [...pluginMenu.querySelectorAll(".plugin-option")];
+    if (!options.length) return;
+
+    let index = options.findIndex((item) => item.classList.contains("selected"));
+    if (index < 0) index = 0;
+
+    options[index].classList.remove("selected");
+    index = (index + direction + options.length) % options.length;
+    options[index].classList.add("selected");
+  }
+
+  function selectPlugin(command) {
+    const value = els.input.value;
+    const caret = els.input.selectionStart ?? value.length;
+    const before = value.slice(0, caret);
+    const after = value.slice(caret);
+    const match = before.match(/(^|\s)@[^\s]*$/);
+
+    if (!match) return;
+
+    const start = match.index + match[1].length;
+    const next = `${value.slice(0, start)}${command} ${after}`.replace(/\s+$/, " ");
+
+    els.input.value = next;
+    pluginMenu.hidden = true;
+    resizeTextarea();
+    updateSendState();
+
+    const pos = start + command.length + 1;
+    els.input.focus();
+    els.input.setSelectionRange(pos, pos);
+  }
+
+  function parsePluginRequest(text) {
+    const prefix = "@Search in Fortnite Files";
+    if (!String(text).toLowerCase().startsWith(prefix.toLowerCase())) return null;
+
+    return {
+      id: "fortnite-files",
+      query: String(text).slice(prefix.length).trim()
+    };
+  }
+
+  async function runFortniteFilesPlugin(chat, query) {
+    try {
+      if (!query) {
+        throw new Error("Type what u want to search for after @Search in Fortnite Files.");
+      }
+
+      const result = await searchTh3dryForMessage(`asset ${query}`);
+      removeTypingIndicator();
+
+      let content = "";
+      let attachment = null;
+
+      if (!result || result.unavailable) {
+        content = "I couldn't reach the Fortnite files database right now. Try again in a moment.";
+      } else if (!result.total) {
+        content = `I searched Fortnite files for \`${query}\` but couldn't find anything close.`;
+      } else {
+        const exact = result.exact || [];
+        const related = result.related || [];
+
+        if (exact.length) {
+          const shown = exact.slice(0, 20);
+          content = `Found **${result.total}** result${result.total === 1 ? "" : "s"} in Fortnite files.\\n\\n`;
+          content += shown.map((path) => `\`\`\`text\\n${path}\\n\`\`\``).join("\\n\\n");
+
+          if (related.length) {
+            content += "\\n\\n**Related results:**\\n\\n";
+            content += related.slice(0, 10).map((path) => `\`\`\`text\\n${path}\\n\`\`\``).join("\\n\\n");
+          }
+        } else {
+          content = `I searched Fortnite files for \`${query}\` and couldn't find an exact match, but i found some related results:\\n\\n`;
+          content += related.slice(0, 20).map((path) => `\`\`\`text\\n${path}\\n\`\`\``).join("\\n\\n");
+        }
+
+        if (result.makeFile && result.allMatches?.length) {
+          content += `\\n\\nThere are too many results to send here, so i put the full list in a TXT file.`;
+          attachment = {
+            name: GENERATED_FILE_NAME,
+            mime: "text/plain;charset=utf-8",
+            content: result.allMatches.join("\\n")
+          };
+        }
+      }
+
+      const message = { role: "assistant", content };
+      if (attachment) message.attachment = attachment;
+
+      chat.messages.push(message);
+      chat.updatedAt = Date.now();
+      saveChats();
+      renderAll();
+    } catch (error) {
+      removeTypingIndicator();
+      chat.messages.push({
+        role: "assistant",
+        content: String(error?.message || "Plugin search failed.")
+      });
+      chat.updatedAt = Date.now();
+      saveChats();
+      renderAll();
+    } finally {
+      setBusy(false);
+      updateSendState();
+      els.input.focus();
+    }
+  }
 
   function shouldSearchTh3dry(text) {
     return /(?:asset|path|mesh|material|texture|sound|cue|wave|uasset|uexp|ubulk|pak|ucas|utoc|fmodel|unreleased|removed|files?|folder|plugin|gamefeatures|athena|creative|stw|fortnite|ÙØ³Ø§Ø±|Ø¨Ø§Ø«|ÙÙØ´|ÙØ§ØªÙØ±ÙØ§Ù|ØªÙØ³ØªØ´Ø±|ØµÙØª|ÙÙÙØ§Øª|ÙØ§ÙÙ|Ø§ØµÙ|Ø£ØµÙ|Ø§ØµÙÙ|Ø£ØµÙÙ)/i.test(String(text || ""));
@@ -1194,6 +1426,73 @@
         transform: translateX(-50%) scale(.98);
       }
 
+
+
+      .plugin-menu {
+        position: fixed;
+        z-index: 9800;
+        max-height: 260px;
+        overflow-y: auto;
+        padding: 6px;
+        border: 1px solid #303030;
+        border-radius: 14px;
+        background: rgba(20, 20, 20, .98);
+        box-shadow: 0 18px 55px rgba(0, 0, 0, .38);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+      }
+
+      .plugin-menu[hidden] {
+        display: none !important;
+      }
+
+      .plugin-option {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        color: #f3f3f3;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .plugin-option:hover,
+      .plugin-option.selected {
+        background: #2a2a2a;
+      }
+
+      .plugin-icon {
+        width: 34px;
+        height: 34px;
+        flex: 0 0 34px;
+        display: grid;
+        place-items: center;
+        border: 1px solid #3a3a3a;
+        border-radius: 9px;
+        background: #202020;
+        font-weight: 800;
+      }
+
+      .plugin-info {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .plugin-info strong {
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .plugin-info small {
+        color: #8b8b8b;
+        font-size: 11px;
+      }
 
       .generated-file-card {
         width: min(520px, 100%);
