@@ -1,12 +1,12 @@
 (() => {
   "use strict";
 
-  const KEY = "fortniteAiAgent.language.v1";
+  const STORAGE_KEY = "fortniteAiAgent.language.v1";
   const SUPPORTED = ["en", "fr", "ar"];
 
   const COPY = {
     en: {
-      brand: "🍏Fortnite Ai Agent",
+      brand: "Fortnite Ai Agent",
       newChat: "New chat",
       moreTools: "More Tools",
       settings: "Settings",
@@ -14,24 +14,18 @@
       welcomeTitle: "Chat with FNAA (Fortnite Ai Agent)",
       welcomeSubtitle: "Fortnite files, FModel, UEFN, Verse, asset paths and research.",
       messagePlaceholder: "Message Fortnite Ai Agent",
-
       toolsTitle: "More Tools",
-      assets: "Search",
+      searchTab: "Search",
       ids: "IDs",
       devices: "Devices",
       convert: "Convert",
       path: "Path",
       cosmetic: "Cosmetic",
-
       settingsTitle: "Settings",
       changeLanguage: "Change the language",
+      language: "Language",
       dmOwner: "DM the owner",
       ownerHint: "@its.swag on Discord",
-      language: "Language",
-      english: "English",
-      french: "French",
-      arabic: "Arabic",
-
       loginDescription: "Use your own Groq key or continue as Guest.",
       login: "Log in",
       guest: "Guest",
@@ -39,13 +33,11 @@
       apiDescription: "Groq key only. It stays in this browser session.",
       continue: "Continue",
       createGroq: "Create one for free from Groq API",
-
       manualSearch: "Manual Search",
       manualNote: "Search the full local Fortnite files database manually.",
       searchPlaceholder: "Search a path, asset, SM_, M_, MI_...",
       search: "Search",
       searching: "Searching",
-
       pathModifier: "Path Modifier",
       pathNote: "Convert Fortnite file paths to Unreal object paths.",
       addClass: "Add _C",
@@ -55,7 +47,6 @@
       hideJson: "Hide JSON",
       copyJson: "Copy JSON",
       jsonUnavailable: "JSON is unavailable for this path.",
-
       islandsIds: "Islands & IDs",
       searchIslands: "Search islands / IDs",
       deviceMeshes: "Device Meshes",
@@ -67,7 +58,7 @@
     },
 
     fr: {
-      brand: "🍏Fortnite Ai Agent",
+      brand: "Fortnite Ai Agent",
       newChat: "Nouveau chat",
       moreTools: "Plus d’outils",
       settings: "Paramètres",
@@ -75,24 +66,18 @@
       welcomeTitle: "Discuter avec FNAA (Fortnite Ai Agent)",
       welcomeSubtitle: "Fichiers Fortnite, FModel, UEFN, Verse, chemins d’assets et recherche.",
       messagePlaceholder: "Message à Fortnite Ai Agent",
-
       toolsTitle: "Plus d’outils",
-      assets: "Recherche",
+      searchTab: "Recherche",
       ids: "IDs",
       devices: "Appareils",
       convert: "Convertir",
       path: "Chemin",
       cosmetic: "Cosmétiques",
-
       settingsTitle: "Paramètres",
       changeLanguage: "Changer la langue",
+      language: "Langue",
       dmOwner: "Contacter le propriétaire",
       ownerHint: "@its.swag sur Discord",
-      language: "Langue",
-      english: "Anglais",
-      french: "Français",
-      arabic: "Arabe",
-
       loginDescription: "Utilise ta clé Groq ou continue en invité.",
       login: "Connexion",
       guest: "Invité",
@@ -100,13 +85,11 @@
       apiDescription: "Clé Groq uniquement. Elle reste dans cette session du navigateur.",
       continue: "Continuer",
       createGroq: "Créer une clé gratuitement sur Groq API",
-
       manualSearch: "Recherche manuelle",
       manualNote: "Recherche manuellement dans la base locale des fichiers Fortnite.",
       searchPlaceholder: "Chemin, asset, SM_, M_, MI_...",
       search: "Rechercher",
       searching: "Recherche",
-
       pathModifier: "Modificateur de chemin",
       pathNote: "Convertit les chemins de fichiers Fortnite en chemins d’objets Unreal.",
       addClass: "Ajouter _C",
@@ -116,7 +99,6 @@
       hideJson: "Masquer JSON",
       copyJson: "Copier JSON",
       jsonUnavailable: "JSON indisponible pour ce chemin.",
-
       islandsIds: "Îles & IDs",
       searchIslands: "Rechercher îles / IDs",
       deviceMeshes: "Meshes des appareils",
@@ -128,7 +110,7 @@
     },
 
     ar: {
-      brand: "🍏Fortnite Ai Agent",
+      brand: "Fortnite Ai Agent",
       newChat: "محادثة جديدة",
       moreTools: "المزيد من الأدوات",
       settings: "الإعدادات",
@@ -136,24 +118,18 @@
       welcomeTitle: "تحدث مع FNAA (Fortnite Ai Agent)",
       welcomeSubtitle: "ملفات فورتنايت، FModel، UEFN، Verse، المسارات والبحث.",
       messagePlaceholder: "اكتب إلى Fortnite Ai Agent",
-
       toolsTitle: "المزيد من الأدوات",
-      assets: "البحث",
+      searchTab: "البحث",
       ids: "المعرفات",
       devices: "الأجهزة",
       convert: "التحويل",
       path: "المسار",
       cosmetic: "الكوزمتكس",
-
       settingsTitle: "الإعدادات",
       changeLanguage: "تغيير اللغة",
+      language: "اللغة",
       dmOwner: "راسل المالك",
       ownerHint: "@its.swag على Discord",
-      language: "اللغة",
-      english: "الإنجليزية",
-      french: "الفرنسية",
-      arabic: "العربية",
-
       loginDescription: "استخدم مفتاح Groq الخاص بك أو أكمل كضيف.",
       login: "تسجيل الدخول",
       guest: "ضيف",
@@ -161,13 +137,11 @@
       apiDescription: "مفتاح Groq فقط، ويبقى داخل جلسة المتصفح الحالية.",
       continue: "متابعة",
       createGroq: "أنشئ مفتاحاً مجاناً من Groq API",
-
       manualSearch: "البحث اليدوي",
       manualNote: "ابحث يدوياً داخل قاعدة ملفات فورتنايت المحلية.",
       searchPlaceholder: "ابحث عن مسار، asset، SM_، M_، MI_...",
       search: "بحث",
       searching: "جاري البحث",
-
       pathModifier: "تعديل المسار",
       pathNote: "حوّل مسارات ملفات فورتنايت إلى Unreal object paths.",
       addClass: "إضافة _C",
@@ -177,7 +151,6 @@
       hideJson: "إخفاء JSON",
       copyJson: "نسخ JSON",
       jsonUnavailable: "لا يوجد JSON متاح لهذا المسار.",
-
       islandsIds: "الجزر والمعرفات",
       searchIslands: "ابحث عن جزيرة / ID",
       deviceMeshes: "Device Meshes",
@@ -190,7 +163,7 @@
   };
 
   function getLanguage() {
-    const saved = localStorage.getItem(KEY);
+    const saved = localStorage.getItem(STORAGE_KEY);
     return SUPPORTED.includes(saved) ? saved : "en";
   }
 
@@ -201,7 +174,6 @@
 
   function apply(root = document) {
     const lang = getLanguage();
-
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
 
@@ -220,9 +192,8 @@
 
   function setLanguage(lang) {
     if (!SUPPORTED.includes(lang)) return;
-    localStorage.setItem(KEY, lang);
+    localStorage.setItem(STORAGE_KEY, lang);
     apply(document);
-
     window.dispatchEvent(new CustomEvent("fortnite-language-changed", {
       detail: { language: lang }
     }));
@@ -234,12 +205,7 @@
     setLanguage(button.dataset.setLanguage);
   });
 
-  window.FortniteI18n = {
-    t,
-    apply,
-    setLanguage,
-    getLanguage
-  };
+  window.FortniteI18n = { t, apply, setLanguage, getLanguage };
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => apply(document), { once:true });
