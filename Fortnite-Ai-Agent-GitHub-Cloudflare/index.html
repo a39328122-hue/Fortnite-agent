@@ -13,16 +13,22 @@
   <div id="app" class="app-shell">
     <aside id="sidebar" class="sidebar" aria-hidden="true">
       <div class="sidebar-head">
-        <div class="brand">Fortnite Ai Agent</div>
+        <div class="brand brand-with-avatar">
+          <img class="brand-avatar" src="./assets/fnaa-avatar.jpeg" alt="" />
+          <span data-i18n="brand">Fortnite Ai Agent</span>
+        </div>
         <button id="closeSidebar" class="icon-btn" type="button" aria-label="Close sidebar">×</button>
       </div>
 
-      <button id="newChatBtn" class="sidebar-action" type="button">New chat</button>
+      <button id="newChatBtn" class="sidebar-action" type="button" data-i18n="newChat">New chat</button>
       <button id="moreToolsBtn" class="sidebar-action sidebar-more" type="button">
-        More Tools <span>›</span>
+        <span data-i18n="moreTools">More Tools</span><span>›</span>
+      </button>
+      <button id="settingsBtn" class="sidebar-action sidebar-more" type="button">
+        <span data-i18n="settings">Settings</span><span>›</span>
       </button>
 
-      <div class="sidebar-section-title">Recents</div>
+      <div class="sidebar-section-title" data-i18n="recents">Recents</div>
       <div id="recentList" class="recent-list"></div>
     </aside>
 
@@ -30,14 +36,17 @@
 
     <header class="topbar">
       <button id="openSidebar" class="icon-btn" type="button" aria-label="Open sidebar">☰</button>
-      <div class="topbar-title">Fortnite Ai Agent</div>
+      <div class="topbar-title brand-with-avatar topbar-brand">
+        <img class="brand-avatar" src="./assets/fnaa-avatar.jpeg" alt="" />
+        <span data-i18n="brand">Fortnite Ai Agent</span>
+      </div>
       <button id="discordTop" class="icon-btn" type="button" aria-label="Discord">•••</button>
     </header>
 
     <main id="chat" class="chat">
       <section id="welcome" class="welcome">
-        <h1>Fortnite Ai Agent</h1>
-        <p>Fortnite files, FModel, UEFN, Verse, asset paths and research.</p>
+        <h1 data-i18n="welcomeTitle">Chat with FNAA (Fortnite Ai Agent)</h1>
+        <p data-i18n="welcomeSubtitle">Fortnite files, FModel, UEFN, Verse, asset paths and research.</p>
       </section>
       <section id="messages" class="messages" aria-live="polite"></section>
     </main>
@@ -49,6 +58,7 @@
           rows="1"
           maxlength="12000"
           placeholder="Message Fortnite Ai Agent"
+          data-i18n-placeholder="messagePlaceholder"
           autocomplete="off"
           spellcheck="true"
         ></textarea>
@@ -64,7 +74,7 @@
     <div class="tools-shell">
       <header class="tools-header">
         <button id="toolsBackBtn" class="icon-btn" type="button" aria-label="Back">‹</button>
-        <div class="tools-title">More Tools</div>
+        <div class="tools-title" data-i18n="toolsTitle">More Tools</div>
         <div></div>
       </header>
 
@@ -73,18 +83,55 @@
       </div>
 
       <nav class="tools-tabs" id="toolsTabs" aria-label="More tools">
-        <button class="tools-tab active" data-tool="assets" type="button">Assets</button>
-        <button class="tools-tab" data-tool="ids" type="button">IDs</button>
-        <button class="tools-tab" data-tool="devices" type="button">Devices</button>
-        <button class="tools-tab" data-tool="convert" type="button">Convert</button>
-        <button class="tools-tab" data-tool="path" type="button">Path</button>
-        <button class="tools-tab" data-tool="cosmetic" type="button">Cosmetic</button>
+        <button class="tools-tab active" data-tool="assets" type="button" data-i18n="searchTab">Search</button>
+        <button class="tools-tab" data-tool="ids" type="button" data-i18n="ids">IDs</button>
+        <button class="tools-tab" data-tool="devices" type="button" data-i18n="devices">Devices</button>
+        <button class="tools-tab" data-tool="convert" type="button" data-i18n="convert">Convert</button>
+        <button class="tools-tab" data-tool="path" type="button" data-i18n="path">Path</button>
+        <button class="tools-tab" data-tool="cosmetic" type="button" data-i18n="cosmetic">Cosmetic</button>
       </nav>
 
       <div id="toolsContent" class="tools-content"></div>
     </div>
   </section>
 
+  <section id="settingsOverlay" class="settings-overlay" hidden aria-hidden="true">
+    <div class="settings-shell">
+      <header class="settings-header">
+        <button id="settingsBackBtn" class="icon-btn" type="button" aria-label="Back">‹</button>
+        <div class="settings-title" data-i18n="settingsTitle">Settings</div>
+        <div></div>
+      </header>
+
+      <div class="settings-content">
+        <section class="settings-card">
+          <div class="settings-card-icon">文</div>
+          <div class="settings-card-main">
+            <h2 data-i18n="changeLanguage">Change the language</h2>
+            <p data-i18n="language">Language</p>
+            <div class="language-grid">
+              <button type="button" class="language-choice" data-set-language="en"><strong>English</strong><small>EN</small></button>
+              <button type="button" class="language-choice" data-set-language="fr"><strong>Français</strong><small>FR</small></button>
+              <button type="button" class="language-choice" data-set-language="ar"><strong>العربية</strong><small>AR</small></button>
+            </div>
+          </div>
+        </section>
+
+        <a class="settings-card settings-link"
+           href="https://discord.com/users/1010719166367535155"
+           target="_blank" rel="noopener noreferrer">
+          <div class="settings-card-icon">@</div>
+          <div class="settings-card-main">
+            <h2 data-i18n="dmOwner">DM the owner</h2>
+            <p data-i18n="ownerHint">@its.swag on Discord</p>
+          </div>
+          <span class="settings-arrow">›</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <script src="./i18n.js"></script>
   <script src="./config.js"></script>
   <script src="./tools.js"></script>
   <script src="./app.js"></script>
