@@ -57,9 +57,16 @@
       closeSidebar();
     });
 
-    els.moreToolsBtn.addEventListener("click", () => {
-      closeSidebar();
-      window.FortniteTools?.open();
+    els.moreToolsBtn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (window.FortniteTools?.open) {
+        window.FortniteTools.open();
+        requestAnimationFrame(closeSidebar);
+      } else {
+        showToast("More Tools failed to load", true);
+      }
     });
 
     els.discordTop.addEventListener("click", async () => {
@@ -490,7 +497,7 @@
     els.loginGate.hidden=false;
     els.loginGate.innerHTML=`
       <div class="login-card">
-        <button class="login-back" id="apiBack" type="button">â¹</button>
+        <button class="login-back" id="apiBack" type="button">‹</button>
         <h1>Type ur API</h1>
         <p>Groq key only. It stays in this browser session.</p>
         <div class="api-input-wrap">
