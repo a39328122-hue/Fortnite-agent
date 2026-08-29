@@ -8,6 +8,7 @@
   const guestBanner=document.getElementById("guestLoginBanner");
   const guestLoginBtn=document.getElementById("guestLoginBtn");
   const DB=window.FORTNITE_AI_DB||{};
+  const t=(key,fallback="")=>window.FortniteI18n?.t(key)||fallback||key;
 
   const EXPORT_BASE="https://export-service-new.dillyapis.com/v1/export";
   const FORTNITE_API="https://fortnite-api.com/v2/cosmetics/br";
@@ -22,6 +23,9 @@
   back.addEventListener("click",close);
   guestLoginBtn.addEventListener("click",()=>window.FortniteAgent?.showApiLogin());
   window.addEventListener("fortnite-login-mode-changed",updateGuestBanner);
+  window.addEventListener("fortnite-language-changed",()=>{
+    if(!overlay.hidden)render();
+  });
 
   tabs.addEventListener("click",(event)=>{
     const b=event.target.closest(".tools-tab");if(!b)return;
@@ -31,8 +35,15 @@
   });
 
   function open(){
-    overlay.hidden=false;overlay.setAttribute("aria-hidden","false");
-    updateGuestBanner();render();
+    active="assets";
+    [...tabs.querySelectorAll(".tools-tab")].forEach((button)=>{
+      button.classList.toggle("active",button.dataset.tool==="assets");
+    });
+
+    overlay.hidden=false;
+    overlay.setAttribute("aria-hidden","false");
+    updateGuestBanner();
+    render();
   }
   function close(){overlay.hidden=true;overlay.setAttribute("aria-hidden","true");}
   function updateGuestBanner(){guestBanner.hidden=sessionStorage.getItem("fortniteAiAgent.loginMode.session")!=="guest";}
@@ -51,15 +62,48 @@
     }
   }
 
+  function startSearchingAnimation(element){
+    const base=t("searching","Searching");
+    const frames=[`${base}.`,`${base}..`,`${base}…`];
+    let index=0;
+
+    element.textContent=frames[index];
+
+    const timer=setInterval(()=>{
+      index=(index+1)%frames.length;
+      element.textContent=frames[index];
+    },350);
+
+    return ()=>clearInterval(timer);
+  }
+
+  function smartSearchScope(selectedScope,query){
+    if(selectedScope!=="all")return selectedScope;
+
+    const q=String(query||"").trim().toLowerCase();
+
+    if(/(^|[\/._-])sm_/.test(q))return "sm";
+    if(/(^|[\/._-])(m_|mi_)/.test(q))return "m";
+
+    if(
+      /(^|[\/._-])sk_/.test(q) ||
+      /\b(mesh|meshes|staticmesh|skeletalmesh)\b/.test(q)
+    ){
+      return "meshes";
+    }
+
+    return "all";
+  }
+
   function renderAssets(){
     content.innerHTML=`
       <div class="tool-section">
-        <h2>Manual Search</h2>
-        <p class="tool-note">Search the full local Fortnite files database manually.</p>
+        <h2>${escapeHtml(t("manualSearch","Manual Search"))}</h2>
+        <p class="tool-note">${escapeHtml(t("manualNote","Search the full local Fortnite files database manually."))}</p>
 
         <div class="tool-searchbar">
-          <input id="assetQuery" placeholder="Search a path, asset, SM_, M_, MI_..." />
-          <button id="assetSearch" class="tool-button primary" type="button">Search</button>
+          <input id="assetQuery" placeholder="${escapeAttr(t("searchPlaceholder","Search a path, asset, SM_, M_, MI_..."))}" />
+          <button id="assetSearch" class="tool-button primary" type="button">${escapeHtml(t("search","Search"))}</button>
         </div>
 
         <div class="tool-subtabs">
@@ -74,8 +118,8 @@
       </div>
 
       <div class="tool-section">
-        <h2>Path Modifier</h2>
-        <p class="tool-note">Convert Fortnite file paths to Unreal object paths.</p>
+        <h2>${escapeHtml(t("pathModifier","Path Modifier"))}</h2>
+        <p class="tool-note">${escapeHtml(t("pathNote","Convert Fortnite file paths to Unreal object paths."))}</p>
 
         <textarea
           id="homePathInput"
@@ -86,21 +130,21 @@
         <div class="tool-actions">
           <label class="tool-note">
             <input id="homeAddClass" type="checkbox" />
-            Add _C
+            ${escapeHtml(t("addClass","Add _C"))}
           </label>
         </div>
 
-        <button id="homeConvertPathBtn" class="tool-button primary" type="button">Convert</button>
+        <button id="homeConvertPathBtn" class="tool-button primary" type="button">${escapeHtml(t("convert","Convert"))}</button>
 
         <textarea
           id="homePathOutput"
           class="tool-textarea"
           readonly
-          placeholder="Converted path will appear here"
+          placeholder="${escapeAttr(t("convertedPath","Converted path will appear here"))}"
         ></textarea>
 
         <div class="tool-actions">
-          <button id="homeCopyPathOutput" class="tool-button" type="button">Copy</button>
+          <button id="homeCopyPathOutput" class="tool-button" type="button">${escapeHtml(t("copy","Copy"))}</button>
         </div>
       </div>`;
 
@@ -123,10 +167,13 @@
       if(!q)return;
 
       results.className="tool-empty";
-      results.textContent="Searching...";
+      const stopSearching=startSearchingAnimation(results);
 
       try{
-        const data=await window.FortniteAgent.searchDatabase(scope,q);
+        const effectiveScope=smartSearchScope(scope,q);
+        const data=await window.FortniteAgent.searchDatabase(effectiveScope,q);
+
+        stopSearching();
 
         if(!data.results?.length){
           results.textContent="No close results found.";
@@ -140,7 +187,9 @@
           .join("");
 
         bindCopyButtons(results);
+        bindJsonButtons(results);
       }catch(e){
+        stopSearching();
         results.className="tool-empty";
         results.textContent=e.message||"Search failed.";
       }
@@ -169,8 +218,8 @@
     const cards=[];walkIdData(idData,cards);
     content.innerHTML=`
       <div class="tool-section">
-        <h2>Islands & IDs</h2>
-        <div class="tool-searchbar"><input id="idSearch" placeholder="Search islands / IDs" /></div>
+        <h2>${escapeHtml(t("islandsIds","Islands & IDs"))}</h2>
+        <div class="tool-searchbar"><input id="idSearch" placeholder="${escapeAttr(t("searchIslands","Search islands / IDs"))}" /></div>
         <div id="idResults">${cards.slice(0,120).map(idCard).join("")}</div>
       </div>`;
     const input=content.querySelector("#idSearch"),results=content.querySelector("#idResults");
@@ -189,8 +238,8 @@
 
     content.innerHTML=`
       <div class="tool-section">
-        <h2>Device Meshes</h2>
-        <div class="tool-searchbar"><input id="deviceSearch" placeholder="Search device..." /></div>
+        <h2>${escapeHtml(t("deviceMeshes","Device Meshes"))}</h2>
+        <div class="tool-searchbar"><input id="deviceSearch" placeholder="${escapeAttr(t("searchDevice","Search device..."))}" /></div>
         <div id="deviceResults">${list.slice(0,100).map(deviceCard).join("")}</div>
       </div>`;
 
@@ -363,14 +412,14 @@
   function renderPathModifier(){
     content.innerHTML=`
       <div class="tool-section">
-        <h2>Path Modifier</h2>
+        <h2>${escapeHtml(t("pathModifier","Path Modifier"))}</h2>
         <textarea id="pathInput" class="tool-textarea" placeholder="FortniteGame/Content/.../Asset.uasset"></textarea>
         <div class="tool-actions">
-          <label class="tool-note"><input id="addClass" type="checkbox" /> Add _C</label>
+          <label class="tool-note"><input id="addClass" type="checkbox" /> ${escapeHtml(t("addClass","Add _C"))}</label>
         </div>
         <button id="convertPathBtn" class="tool-button primary" type="button">Convert</button>
         <textarea id="pathOutput" class="tool-textarea" readonly></textarea>
-        <div class="tool-actions"><button id="copyPathOutput" class="tool-button" type="button">Copy</button></div>
+        <div class="tool-actions"><button id="copyPathOutput" class="tool-button" type="button">${escapeHtml(t("copy","Copy"))}</button></div>
       </div>`;
     const input=content.querySelector("#pathInput"),output=content.querySelector("#pathOutput");
     content.querySelector("#convertPathBtn").addEventListener("click",()=>output.value=modifyPath(input.value,content.querySelector("#addClass").checked));
@@ -393,10 +442,14 @@
   async function renderCosmetics(){
     content.innerHTML=`
       <div class="tool-section">
-        <h2>Cosmetic Browser</h2>
-        <p class="tool-note">Searches your local Fortnite database. Character icons load only for visible cards.</p>
+        <h2>${escapeHtml(t("cosmeticBrowser","Cosmetic Browser"))}</h2>
+        <p class="tool-note">${escapeHtml(t("cosmeticNote","Search your local Fortnite database for cosmetics."))}</p>
+        <a class="tool-external-link"
+           href="https://fortnite.gg/cosmetics"
+           target="_blank"
+           rel="noopener noreferrer">${escapeHtml(t("moreCosmeticIds","For more cosmetics ids"))}</a>
         <div class="tool-searchbar">
-          <input id="cosmeticSearch" placeholder="Skin name, CID, character path..." />
+          <input id="cosmeticSearch" placeholder="${escapeAttr(t("cosmeticSearch","Skin name, CID, character path..."))}" />
           <button id="cosmeticBtn" class="tool-button primary" type="button">Search</button>
         </div>
         <div id="cosmeticStatus" class="tool-empty">Search for a cosmetic.</div>
@@ -464,7 +517,37 @@
     }catch{}
   }
 
-  function pathCard(path,source){return `<div class="tool-card"><div class="tool-card-head"><div class="tool-card-title">${source==="json"?"JSON reference":"Asset path"}</div></div>${pathRow(source==="json"?"JSON":"PATH",path)}</div>`;}
+  function pathCard(path,source){
+    const label=source==="json"?"JSON":"PATH";
+    const title=source==="json"?"JSON reference":"Asset path";
+
+    return `
+      <div class="tool-card">
+        <div class="tool-card-head">
+          <div class="tool-card-title">${escapeHtml(title)}</div>
+        </div>
+
+        ${pathRow(label,path)}
+
+        <div class="json-actions">
+          <button
+            class="json-view-button"
+            type="button"
+            data-json-path="${escapeAttr(path)}"
+          >${escapeHtml(t("json","JSON"))}</button>
+        </div>
+
+        <div class="json-panel" hidden>
+          <div class="json-panel-head">
+            <span>JSON</span>
+            <button class="json-view-button json-copy-button" type="button">
+              ${escapeHtml(t("copyJson","Copy JSON"))}
+            </button>
+          </div>
+          <pre><code></code></pre>
+        </div>
+      </div>`;
+  }
   function pathRow(label,value){return `<div class="path-row"><div class="path-label">${escapeHtml(label)}</div><div class="path-value" title="${escapeAttr(value)}">${escapeHtml(value)}</div><button class="path-copy" type="button" data-copy="${escapeAttr(value)}">COPY</button></div>`;}
   function idCard(item){return `<div class="tool-card"><div class="tool-card-head">${item.image?`<img class="tool-card-image" src="${escapeAttr(item.image)}" alt="" loading="lazy" />`:`<div class="tool-card-image"></div>`}<div class="tool-card-title">${escapeHtml(item.name||item.title||"Unknown")}</div></div>${item.playset?pathRow("PLAYSET",item.playset):""}${item.plot?pathRow("PLOT",item.plot):""}${item.path?pathRow("PATH",item.path):""}</div>`;}
   function normalizeDeviceData(data){
@@ -534,6 +617,57 @@
     if(Array.isArray(value))value.forEach((v,i)=>walkIdData(v,out,String(i)));
     else Object.entries(value).forEach(([k,v])=>walkIdData(v,out,k));
   }
+  function bindJsonButtons(root){
+    root.querySelectorAll("[data-json-path]").forEach((button)=>{
+      if(button.dataset.jsonBound)return;
+      button.dataset.jsonBound="1";
+
+      button.addEventListener("click",async()=>{
+        const card=button.closest(".tool-card");
+        const panel=card?.querySelector(".json-panel");
+        const code=panel?.querySelector("code");
+        const copyButton=panel?.querySelector(".json-copy-button");
+
+        if(!panel||!code)return;
+
+        if(!panel.hidden){
+          panel.hidden=true;
+          button.textContent=t("json","JSON");
+          return;
+        }
+
+        if(button.dataset.loaded==="1"){
+          panel.hidden=false;
+          button.textContent=t("hideJson","Hide JSON");
+          return;
+        }
+
+        button.disabled=true;
+        button.textContent="Loading...";
+
+        try{
+          const data=await exportJson(button.dataset.jsonPath);
+          const pretty=JSON.stringify(data,null,2);
+
+          code.textContent=pretty||"[]";
+          panel.hidden=false;
+          button.dataset.loaded="1";
+          button.textContent=t("hideJson","Hide JSON");
+
+          if(copyButton){
+            copyButton.onclick=()=>copy(pretty);
+          }
+        }catch(error){
+          code.textContent=error?.message||t("jsonUnavailable","JSON is unavailable for this path.");
+          panel.hidden=false;
+          button.textContent=t("json","JSON");
+        }finally{
+          button.disabled=false;
+        }
+      });
+    });
+  }
+
   function bindCopyButtons(root){root.querySelectorAll("[data-copy]").forEach(b=>{if(b.dataset.bound)return;b.dataset.bound="1";b.addEventListener("click",()=>copy(b.dataset.copy||""));});}
   async function copy(value){
     if(!value)return;
