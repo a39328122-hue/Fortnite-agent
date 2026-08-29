@@ -389,7 +389,7 @@
       const t=document.createElement("span");t.className="plugin-title";t.textContent=`@${p.label}`;
       const d=document.createElement("small");d.textContent=p.description;
       info.append(t,d);b.append(icon,info);
-      b.addEventListener("pointerdown",(e)=>{e.preventDefault();selectPlugin(p.command);});
+      b.addEventListener("click",(e)=>{e.preventDefault();selectPlugin(p.command);});
       pluginMenu.append(b);
     });
     pluginMenu.hidden=false;
