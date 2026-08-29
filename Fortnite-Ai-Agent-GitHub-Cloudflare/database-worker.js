@@ -3,6 +3,19 @@ let cache = {
   indexes: new Map()
 };
 
+const resultCache = new Map();
+const RESULT_CACHE_LIMIT = 24;
+
+function rememberSearch(key, value) {
+  if (resultCache.has(key)) resultCache.delete(key);
+  resultCache.set(key, value);
+
+  while (resultCache.size > RESULT_CACHE_LIMIT) {
+    const oldest = resultCache.keys().next().value;
+    resultCache.delete(oldest);
+  }
+}
+
 self.addEventListener("message", async (event) => {
   const msg = event.data || {};
   if (msg.type !== "search") return;
@@ -22,6 +35,15 @@ async function search(scope, query, config) {
   }
 
   const scopeKey = normalizeScope(scope);
+  const cacheKey = `${scopeKey}|${tokens.join("\u001f")}`;
+  const cached = resultCache.get(cacheKey);
+
+  if (cached) {
+    resultCache.delete(cacheKey);
+    resultCache.set(cacheKey, cached);
+    return cached;
+  }
+
   const index = await loadIndex(scopeKey, config);
   const jsonIndex = scopeKey === "meshes" || scopeKey === "all"
     ? await loadOptionalIndex("json", config)
@@ -76,12 +98,15 @@ async function search(scope, query, config) {
     if (unique.length >= 1200) break;
   }
 
-  return {
+  const payload = {
     total: unique.length,
     results: unique.slice(0, 80),
     allResults: unique,
     makeFile: unique.length >= 120
   };
+
+  rememberSearch(cacheKey, payload);
+  return payload;
 }
 
 function normalizeScope(scope) {
@@ -92,7 +117,8 @@ function tokenize(value) {
   const stop = new Set([
     "the","a","an","for","from","of","to","in","on","with","and","or","find","search",
     "asset","assets","path","paths","file","files","fortnite","please","pls","show","give","me",
-    "Ø§Ø±ÙØ¯","Ø£Ø±ÙØ¯","Ø¯ÙØ±","Ø§Ø¨Ø­Ø«","Ø¹Ù","Ø¹ÙÙ","ÙÙ","ÙÙ","ÙØ§Ù","ÙØ§ÙØª","Ø¨Ø§Ø«","ÙØ³Ø§Ø±","ÙÙÙ","ÙÙÙØ§Øª","ÙÙØ±ØªÙØ§ÙØª"
+    "اريد","أريد","دور","ابحث","أبحث","عن","على","في","من",
+    "مال","مالت","بحث","مسار","ملف","ملفات","فورتنايت"
   ]);
 
   return [...new Set(
@@ -107,13 +133,22 @@ function tokenize(value) {
 
 function scorePath(path, tokens, scope) {
   const lower = path.toLowerCase();
+
+  let matched = 0;
+  for (const token of tokens) {
+    if (lower.includes(token)) matched++;
+  }
+
+  if (matched === 0) {
+    return { matched: 0, score: 0 };
+  }
+
   const file = lower.slice(lower.lastIndexOf("/") + 1);
   const normalizedFile = file
     .replace(/\.(uasset|uexp|ubulk)$/i, "")
     .replace(/^(sm_|sk_|m_|mi_)/i, "")
     .replace(/[_\-.]+/g, " ");
 
-  let matched = 0;
   let score = scopeBonus(file, lower, scope);
 
   for (const token of tokens) {
@@ -121,7 +156,6 @@ function scorePath(path, tokens, scope) {
     const inFile = file.includes(token);
     const inNormalized = normalizedFile.includes(token);
 
-    if (inPath) matched++;
     if (inPath) score += token.length * 5;
     if (inFile) score += token.length * 12;
     if (inNormalized) score += token.length * 14;
@@ -175,7 +209,13 @@ async function loadIndex(scope, config) {
   try {
     list = await fetchGzipLines(urls[scope]);
   } catch {
-    if (scope !== "all") {
+    if (scope === "new") {
+      try {
+        list = await fetchGzipLines(config.newRaw || "./database/fortnite_assets_new.gz");
+      } catch {
+        list = [];
+      }
+    } else if (scope !== "all") {
       list = await loadIndex("all", config);
       list = filterScope(list, scope);
     } else {
