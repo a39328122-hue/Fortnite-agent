@@ -1,4 +1,4 @@
-{
+:root{
   color-scheme:dark;
   --bg:#000;
   --panel:#101010;
@@ -228,4 +228,85 @@ button{color:inherit}
   .tools-tabs{width:min(880px,100%);margin:auto}
   .converter-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
   .cosmetic-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+
+
+/* ===== Chat rendering hotfix ===== */
+.assistant-wrap,
+.assistant-content,
+.assistant-content p,
+.assistant-content li,
+.assistant-content h1,
+.assistant-content h2,
+.assistant-content h3{
+  color:var(--text,#f5f5f5);
+}
+
+.assistant-content{
+  width:100%;
+  min-width:0;
+}
+
+.assistant-content p,
+.assistant-content li{
+  overflow-wrap:break-word;
+  word-break:normal;
+}
+
+.assistant-content .inline-code{
+  display:inline;
+  max-width:100%;
+  color:#f3f3f3;
+  background:#1b1b1b;
+  border:1px solid #292929;
+  white-space:normal;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+  -webkit-box-decoration-break:clone;
+  box-decoration-break:clone;
+}
+
+.assistant-content .code-block{
+  display:block;
+  width:100%;
+  max-width:100%;
+  margin:10px 0;
+  overflow:hidden;
+  color:#f3f3f3;
+}
+
+.assistant-content .code-block pre{
+  display:block;
+  width:100%;
+  max-width:100%;
+  margin:0;
+  overflow-x:auto;
+  overflow-y:hidden;
+  -webkit-overflow-scrolling:touch;
+}
+
+.assistant-content .code-block code{
+  display:block;
+  width:max-content;
+  min-width:100%;
+  color:#f3f3f3;
+  white-space:pre;
+  overflow-wrap:normal;
+  word-break:normal;
+}
+
+@media (max-width:520px){
+  .messages{
+    width:100%;
+    padding-left:12px;
+    padding-right:12px;
+  }
+
+  .assistant-content{
+    font-size:14px;
+  }
+
+  .assistant-content .code-block code{
+    font-size:11px;
+  }
 }
