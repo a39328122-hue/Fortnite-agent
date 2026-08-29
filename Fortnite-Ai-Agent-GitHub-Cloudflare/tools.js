@@ -1,4 +1,4 @@
- (() => {
+(() => {
   "use strict";
 
   const overlay=document.getElementById("toolsOverlay");
@@ -416,7 +416,7 @@
 
     if(/^https?:\/\//i.test(raw))return raw;
 
-    const filename=raw.replace(/\/g,"/").split("/").pop();
+    const filename=raw.replace(/\\/g,"/").split("/").pop();
     if(!filename)return "";
 
     return `https://raw.githubusercontent.com/Th3DryZ69/FortniteToolsWeb/main/public/images/devices/${encodeURIComponent(filename)}`;
@@ -458,8 +458,6 @@
     if(!Array.isArray(value)&&("playset"in value||"plot"in value||"path"in value))out.push({name:value.name||value.title||key,...value});
     if(Array.isArray(value))value.forEach((v,i)=>walkIdData(v,out,String(i)));
     else Object.entries(value).forEach(([k,v])=>walkIdData(v,out,k));
-  }
-    return[];
   }
   function bindCopyButtons(root){root.querySelectorAll("[data-copy]").forEach(b=>{if(b.dataset.bound)return;b.dataset.bound="1";b.addEventListener("click",()=>copy(b.dataset.copy||""));});}
   async function copy(value){
