@@ -2,8 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#000000" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Fortnite Ai Agent</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
@@ -15,10 +17,7 @@
         <button id="closeSidebar" class="icon-btn" type="button" aria-label="Close sidebar">×</button>
       </div>
 
-      <button id="newChatBtn" class="sidebar-action" type="button">＋ New chat</button>
-      <a class="sidebar-link" href="https://th3dryz69.github.io/FortniteToolsWeb/public/html/searchAssets.html" target="_blank" rel="noopener noreferrer">
-        Fortnite asset path
-      </a>
+      <button id="newChatBtn" class="sidebar-action" type="button">New chat</button>
       <button id="moreToolsBtn" class="sidebar-action sidebar-more" type="button">
         More Tools <span>›</span>
       </button>
@@ -59,7 +58,6 @@
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-
   <div id="loginGate" class="login-gate" hidden></div>
 
   <section id="toolsOverlay" class="tools-overlay" hidden aria-hidden="true">
@@ -67,21 +65,21 @@
       <header class="tools-header">
         <button id="toolsBackBtn" class="icon-btn" type="button" aria-label="Back">‹</button>
         <div class="tools-title">More Tools</div>
-        <div class="tools-header-spacer"></div>
+        <div></div>
       </header>
 
       <div id="guestLoginBanner" class="guest-login-banner" hidden>
         <button id="guestLoginBtn" type="button">Log in for free!</button>
       </div>
 
-      <div class="tools-tabs" id="toolsTabs" role="tablist">
+      <nav class="tools-tabs" id="toolsTabs" aria-label="More tools">
         <button class="tools-tab active" data-tool="assets" type="button">Assets</button>
-        <button class="tools-tab" data-tool="ids" type="button">ID's</button>
-        <button class="tools-tab" data-tool="devices" type="button">DeviceMeshes</button>
+        <button class="tools-tab" data-tool="ids" type="button">IDs</button>
+        <button class="tools-tab" data-tool="devices" type="button">Devices</button>
         <button class="tools-tab" data-tool="convert" type="button">Convert</button>
         <button class="tools-tab" data-tool="path" type="button">Path</button>
         <button class="tools-tab" data-tool="cosmetic" type="button">Cosmetic</button>
-      </div>
+      </nav>
 
       <div id="toolsContent" class="tools-content"></div>
     </div>
