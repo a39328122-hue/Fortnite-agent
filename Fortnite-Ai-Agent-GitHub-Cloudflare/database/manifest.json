@@ -1,0 +1,15 @@
+{
+  "builtAt": "2026-08-29T02:20:12.547030+00:00",
+  "counts": {
+    "all": 1779650,
+    "sm": 53149,
+    "m": 135133,
+    "meshes": 129307,
+    "new": 74710,
+    "jsonReferences": 0
+  },
+  "source": {
+    "fortnite_assets": "fortnite_assets.gz",
+    "fortnite_assets_new": "fortnite_assets_new.gz"
+  }
+}
