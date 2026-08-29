@@ -626,3 +626,158 @@ html[dir="rtl"] .user-bubble{direction:rtl;text-align:right}
     flex-basis:22px;
   }
 }
+
+/* ===== IDs + Device Meshes merged view ===== */
+.ids-combined-section{
+  padding-bottom:22px;
+}
+
+.ids-group{
+  width:100%;
+}
+
+.ids-group-head{
+  display:flex;
+  align-items:flex-end;
+  justify-content:space-between;
+  gap:10px;
+  margin-bottom:8px;
+}
+
+.ids-group-head h2{
+  margin-bottom:4px;
+}
+
+.ids-section-divider{
+  height:1px;
+  margin:22px 0;
+  background:#202020;
+}
+
+.device-show-all{
+  flex:0 0 auto;
+  white-space:nowrap;
+}
+
+.th3-device-card{
+  overflow:hidden;
+}
+
+.th3-device-head{
+  align-items:center;
+}
+
+.th3-device-header-text{
+  flex:1;
+  min-width:0;
+}
+
+.device-image-placeholder{
+  display:grid;
+  place-items:center;
+  font-size:18px;
+}
+
+.device-playset-short{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 34px;
+  gap:7px;
+  align-items:center;
+  margin-top:6px;
+}
+
+.device-playset-value{
+  min-width:0;
+  color:#999;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:10px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.device-important{
+  padding:8px 10px;
+  border-top:1px solid #2b241d;
+  border-bottom:1px solid #2b241d;
+  background:#17120e;
+  color:#d2a06c;
+  font-size:10px;
+  line-height:1.45;
+}
+
+.device-settings-table{
+  border-top:1px solid #222;
+}
+
+.device-setting-row{
+  display:grid;
+  grid-template-columns:minmax(90px,.7fr) minmax(0,1.3fr);
+  border-top:1px solid #1e1e1e;
+}
+
+.device-setting-row:first-child{
+  border-top:0;
+}
+
+.device-setting-name{
+  min-width:0;
+  padding:9px;
+  border-right:1px solid #1e1e1e;
+  color:#aaa;
+  font-size:10px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+.device-setting-fields{
+  min-width:0;
+}
+
+.device-setting-field{
+  display:grid;
+  grid-template-columns:30px minmax(0,1fr) 34px;
+  gap:6px;
+  align-items:center;
+  padding:6px 8px;
+  border-top:1px solid #1d1d1d;
+}
+
+.device-setting-field:first-child{
+  border-top:0;
+}
+
+.device-field-tag{
+  color:#b27b52;
+  font-size:9px;
+  font-weight:800;
+  text-transform:uppercase;
+}
+
+.device-field-value{
+  min-width:0;
+  color:#979797;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:9px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+@media (max-width:520px){
+  .ids-group-head{
+    align-items:flex-start;
+  }
+
+  .device-setting-row{
+    grid-template-columns:1fr;
+  }
+
+  .device-setting-name{
+    border-right:0;
+    border-bottom:1px solid #1e1e1e;
+    color:#d0d0d0;
+    font-weight:700;
+  }
+}
