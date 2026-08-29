@@ -177,7 +177,7 @@
     const islands=[];
     walkIdData(idData,islands);
 
-    const devices=sortDevicesLikeTh3Dry(normalizeDeviceData(deviceData));
+    const devices=sortDevicesLikeTh3Dry(cleanDeviceList(normalizeDeviceData(deviceData)));
     let showAllDevices=false;
 
     content.innerHTML=`
@@ -256,8 +256,8 @@
 
         const hay=[
           item.name,
-          item.path,
-          item.playset,
+          cleanDeviceText(item.path),
+          cleanDeviceText(item.playset),
           ...(Array.isArray(item.tag)?item.tag:[])
         ].filter(Boolean).join(" ").toLowerCase();
 
@@ -290,7 +290,7 @@
   async function renderDevices(){
     if(!deviceData)deviceData=await fetchJson(DB.devices||"./database/devicemeshs.json");
 
-    const devices=sortDevicesLikeTh3Dry(normalizeDeviceData(deviceData));
+    const devices=sortDevicesLikeTh3Dry(cleanDeviceList(normalizeDeviceData(deviceData)));
     let showAllDevices=false;
 
     content.innerHTML=`
@@ -338,10 +338,10 @@
 
         const hay=[
           item.name,
-          item.path,
-          item.playset,
+          cleanDeviceText(item.path),
+          cleanDeviceText(item.playset),
           ...(Array.isArray(item.tag)?item.tag:[]),
-          item.important,
+          cleanDeviceText(item.important),
           settingsText
         ].filter(Boolean).join(" ").toLowerCase();
 
@@ -751,6 +751,58 @@
     });
   }
 
+  function isJunkDeviceText(value){
+    const text=String(value||"").trim().toLowerCase();
+    if(!text)return false;
+
+    const exactJunk=new Set([
+      "~th3dryz69~",
+      "th3dryz69",
+      "th3dryz69 community",
+      "https://discord.gg/xcdvxzumxx",
+      "xcdvxzumxx",
+      "/"
+    ]);
+
+    if(exactJunk.has(text))return true;
+
+    if(text.includes("i haven't put everything but if you have any ideas"))return true;
+    if(text.includes("dont hesitate to let me know my discord"))return true;
+    if(text.includes("don't hesitate to let me know my discord"))return true;
+    if(text.includes("my discord: th3dryz69_"))return true;
+    if(text.includes("discord.gg/xcdvxzumxx"))return true;
+
+    return false;
+  }
+
+  function cleanDeviceText(value){
+    return isJunkDeviceText(value)?"":String(value||"");
+  }
+
+  function isJunkDevice(item){
+    if(!item||typeof item!=="object")return false;
+
+    if(isJunkDeviceText(item.name))return true;
+
+    const fields=[
+      item.path,
+      item.playset,
+      item.important
+    ];
+
+    const meaningful=fields.some(v=>String(v||"").trim()&&!isJunkDeviceText(v));
+    const junk=fields.some(isJunkDeviceText);
+
+    // Remove fake/credit/footer records that are only made from junk strings.
+    if(junk&&!meaningful)return true;
+
+    return false;
+  }
+
+  function cleanDeviceList(list){
+    return list.filter(item=>!isJunkDevice(item));
+  }
+
   function sortDevicesLikeTh3Dry(list){
     return [...list].sort((a,b)=>{
       const aName=String(a?.name||"");
@@ -773,14 +825,30 @@
   }
 
   function deviceSettingsRows(settings){
-    const entries=Object.entries(settings||{});
+    const entries=Object.entries(settings||{})
+      .map(([settingName,settingData])=>({
+        settingName,
+        settingData:settingData&&typeof settingData==="object"?settingData:{}
+      }))
+      .filter(({settingName,settingData})=>{
+        const key=settingData?.["option key"];
+        const value=settingData?.value;
+
+        // Remove Th3Dry credits/footer/community rows.
+        if(isJunkDeviceText(settingName))return false;
+        if(isJunkDeviceText(key))return false;
+        if(isJunkDeviceText(value))return false;
+
+        return true;
+      });
+
     if(!entries.length)return "";
 
     return `
       <div class="device-settings-table">
-        ${entries.map(([settingName,settingData])=>{
-          const key=String(settingData?.["option key"]||"");
-          const value=String(settingData?.value||"");
+        ${entries.map(({settingName,settingData})=>{
+          const key=cleanDeviceText(settingData?.["option key"]);
+          const value=cleanDeviceText(settingData?.value);
 
           return `
             <div class="device-setting-row">
@@ -809,8 +877,8 @@
   function deviceCardSimple(item){
     const title=item.name||item.title||item.device||item.id||"Device";
     const image=deviceImageUrl(item);
-    const playset=String(item.playset||"");
-    const path=String(item.path||"");
+    const playset=cleanDeviceText(item.playset);
+    const path=cleanDeviceText(item.path);
 
     return `
       <div class="tool-card th3-device-card">
@@ -839,9 +907,9 @@
   function deviceCardLikeTh3Dry(item){
     const title=item.name||item.title||item.device||item.id||"Device";
     const image=deviceImageUrl(item);
-    const playset=String(item.playset||"");
-    const path=String(item.path||"");
-    const important=String(item.important||"").trim();
+    const playset=cleanDeviceText(item.playset);
+    const path=cleanDeviceText(item.path);
+    const important=cleanDeviceText(item.important).trim();
 
     return `
       <div class="tool-card th3-device-card">
