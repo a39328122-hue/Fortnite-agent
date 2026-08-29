@@ -115,37 +115,6 @@
         </div>
 
         <div id="assetResults" class="tool-empty">Type something to search.</div>
-      </div>
-
-      <div class="tool-section">
-        <h2>${escapeHtml(t("pathModifier","Path Modifier"))}</h2>
-        <p class="tool-note">${escapeHtml(t("pathNote","Convert Fortnite file paths to Unreal object paths."))}</p>
-
-        <textarea
-          id="homePathInput"
-          class="tool-textarea"
-          placeholder="FortniteGame/Content/.../Asset.uasset"
-        ></textarea>
-
-        <div class="tool-actions">
-          <label class="tool-note">
-            <input id="homeAddClass" type="checkbox" />
-            ${escapeHtml(t("addClass","Add _C"))}
-          </label>
-        </div>
-
-        <button id="homeConvertPathBtn" class="tool-button primary" type="button">${escapeHtml(t("convert","Convert"))}</button>
-
-        <textarea
-          id="homePathOutput"
-          class="tool-textarea"
-          readonly
-          placeholder="${escapeAttr(t("convertedPath","Converted path will appear here"))}"
-        ></textarea>
-
-        <div class="tool-actions">
-          <button id="homeCopyPathOutput" class="tool-button" type="button">${escapeHtml(t("copy","Copy"))}</button>
-        </div>
       </div>`;
 
     let scope="all";
@@ -199,70 +168,205 @@
     input.addEventListener("keydown",e=>{
       if(e.key==="Enter")run();
     });
-
-    const pathInput=content.querySelector("#homePathInput");
-    const pathOutput=content.querySelector("#homePathOutput");
-    const addClass=content.querySelector("#homeAddClass");
-
-    content.querySelector("#homeConvertPathBtn").addEventListener("click",()=>{
-      pathOutput.value=modifyPath(pathInput.value,addClass.checked);
-    });
-
-    content.querySelector("#homeCopyPathOutput").addEventListener("click",()=>{
-      copy(pathOutput.value);
-    });
   }
 
   async function renderIds(){
-    if(!idData) idData=await fetchJson(DB.ids||"./database/id.json");
-    const cards=[];walkIdData(idData,cards);
+    if(!idData)idData=await fetchJson(DB.ids||"./database/id.json");
+    if(!deviceData)deviceData=await fetchJson(DB.devices||"./database/devicemeshs.json");
+
+    const islands=[];
+    walkIdData(idData,islands);
+
+    const devices=sortDevicesLikeTh3Dry(normalizeDeviceData(deviceData));
+    let showAllDevices=false;
+
     content.innerHTML=`
-      <div class="tool-section">
-        <h2>${escapeHtml(t("islandsIds","Islands & IDs"))}</h2>
-        <div class="tool-searchbar"><input id="idSearch" placeholder="${escapeAttr(t("searchIslands","Search islands / IDs"))}" /></div>
-        <div id="idResults">${cards.slice(0,120).map(idCard).join("")}</div>
+      <div class="tool-section ids-combined-section">
+        <section class="ids-group">
+          <div class="ids-group-head">
+            <div>
+              <h2>Islands</h2>
+              <p class="tool-note">Creative islands, playsets and plot IDs.</p>
+            </div>
+          </div>
+
+          <div class="tool-searchbar">
+            <input
+              id="idSearch"
+              placeholder="${escapeAttr(t("searchIslands","Search islands / IDs"))}"
+            />
+          </div>
+
+          <div id="idResults">
+            ${islands.slice(0,120).map(idCard).join("")}
+          </div>
+        </section>
+
+        <div class="ids-section-divider"></div>
+
+        <section class="ids-group device-meshes-group">
+          <div class="ids-group-head">
+            <div>
+              <h2>${escapeHtml(t("deviceMeshes","Device Meshes"))}</h2>
+            </div>
+
+            <button id="showAllDevices" class="tool-button device-show-all" type="button">
+              👁 Show All
+            </button>
+          </div>
+
+          <div class="tool-searchbar">
+            <input
+              id="deviceSearchInIds"
+              placeholder="${escapeAttr(t("searchDevice","Search device..."))}"
+            />
+          </div>
+
+          <div id="deviceResultsInIds"></div>
+        </section>
       </div>`;
-    const input=content.querySelector("#idSearch"),results=content.querySelector("#idResults");
-    input.addEventListener("input",()=>{
-      const q=input.value.trim().toLowerCase();
-      const filtered=!q?cards:cards.filter(x=>JSON.stringify(x).toLowerCase().includes(q));
-      results.innerHTML=filtered.slice(0,180).map(idCard).join("")||'<div class="tool-empty">No results.</div>';
-      bindCopyButtons(results);
+
+    const idInput=content.querySelector("#idSearch");
+    const idResults=content.querySelector("#idResults");
+    const deviceInput=content.querySelector("#deviceSearchInIds");
+    const deviceResults=content.querySelector("#deviceResultsInIds");
+    const showAllButton=content.querySelector("#showAllDevices");
+
+    const renderIslandResults=()=>{
+      const q=idInput.value.trim().toLowerCase();
+      const filtered=!q
+        ?islands
+        :islands.filter(item=>JSON.stringify(item).toLowerCase().includes(q));
+
+      idResults.innerHTML=
+        filtered.slice(0,180).map(idCard).join("")||
+        '<div class="tool-empty">No results.</div>';
+
+      bindCopyButtons(idResults);
+      bindIdImageFallbacks(idResults);
+    };
+
+    const renderDeviceResults=()=>{
+      const q=deviceInput.value.trim().toLowerCase();
+
+      const filtered=devices.filter(item=>{
+        if(!showAllDevices&&item.dispo===false)return false;
+
+        if(!q)return true;
+
+        const hay=[
+          item.name,
+          item.path,
+          item.playset,
+          ...(Array.isArray(item.tag)?item.tag:[])
+        ].filter(Boolean).join(" ").toLowerCase();
+
+        return hay.includes(q);
+      });
+
+      deviceResults.innerHTML=
+        filtered.slice(0,220).map(deviceCardSimple).join("")||
+        '<div class="tool-empty">No devices found.</div>';
+
+      bindCopyButtons(deviceResults);
+      bindImageFallbacks(deviceResults);
+    };
+
+    idInput.addEventListener("input",renderIslandResults);
+    deviceInput.addEventListener("input",renderDeviceResults);
+
+    showAllButton.addEventListener("click",()=>{
+      showAllDevices=!showAllDevices;
+      showAllButton.textContent=showAllDevices
+        ?"🙈 Hide Unavailable"
+        :"👁 Show All";
+      renderDeviceResults();
     });
-    bindCopyButtons(results);
+
+    renderIslandResults();
+    renderDeviceResults();
   }
 
   async function renderDevices(){
-    if(!deviceData) deviceData=await fetchJson(DB.devices||"./database/devicemeshs.json");
-    const list=normalizeDeviceData(deviceData);
+    if(!deviceData)deviceData=await fetchJson(DB.devices||"./database/devicemeshs.json");
+
+    const devices=sortDevicesLikeTh3Dry(normalizeDeviceData(deviceData));
+    let showAllDevices=false;
 
     content.innerHTML=`
       <div class="tool-section">
-        <h2>${escapeHtml(t("deviceMeshes","Device Meshes"))}</h2>
-        <div class="tool-searchbar"><input id="deviceSearch" placeholder="${escapeAttr(t("searchDevice","Search device..."))}" /></div>
-        <div id="deviceResults">${list.slice(0,100).map(deviceCard).join("")}</div>
+        <div class="ids-group-head">
+          <div>
+            <h2>${escapeHtml(t("deviceMeshes","Device Meshes"))}</h2>
+            <p class="tool-note">Full device data with settings, keys and values.</p>
+          </div>
+
+          <button id="showAllDevicesFull" class="tool-button device-show-all" type="button">
+            👁 Show All
+          </button>
+        </div>
+
+        <div class="tool-searchbar">
+          <input
+            id="deviceSearch"
+            placeholder="${escapeAttr(t("searchDevice","Search device..."))}"
+          />
+        </div>
+
+        <div id="deviceResults"></div>
       </div>`;
 
-    const input=content.querySelector("#deviceSearch"),results=content.querySelector("#deviceResults");
+    const input=content.querySelector("#deviceSearch");
+    const results=content.querySelector("#deviceResults");
+    const showAllButton=content.querySelector("#showAllDevicesFull");
 
-    input.addEventListener("input",()=>{
+    const renderResults=()=>{
       const q=input.value.trim().toLowerCase();
-      const filtered=!q?list:list.filter(x=>{
+
+      const filtered=devices.filter(item=>{
+        if(!showAllDevices&&item.dispo===false)return false;
+
+        if(!q)return true;
+
+        const settingsText=Object.entries(item.settings||{})
+          .map(([name,data])=>[
+            name,
+            data?.["option key"],
+            data?.value
+          ].filter(Boolean).join(" "))
+          .join(" ");
+
         const hay=[
-          x.name,
-          x.path,
-          x.playset,
-          ...(Array.isArray(x.tag)?x.tag:[])
+          item.name,
+          item.path,
+          item.playset,
+          ...(Array.isArray(item.tag)?item.tag:[]),
+          item.important,
+          settingsText
         ].filter(Boolean).join(" ").toLowerCase();
+
         return hay.includes(q);
       });
-      results.innerHTML=filtered.slice(0,160).map(deviceCard).join("")||'<div class="tool-empty">No results.</div>';
+
+      results.innerHTML=
+        filtered.slice(0,220).map(deviceCardLikeTh3Dry).join("")||
+        '<div class="tool-empty">No devices found.</div>';
+
       bindCopyButtons(results);
       bindImageFallbacks(results);
+    };
+
+    input.addEventListener("input",renderResults);
+
+    showAllButton.addEventListener("click",()=>{
+      showAllDevices=!showAllDevices;
+      showAllButton.textContent=showAllDevices
+        ?"🙈 Hide Unavailable"
+        :"👁 Show All";
+      renderResults();
     });
 
-    bindCopyButtons(results);
-    bindImageFallbacks(results);
+    renderResults();
   }
 
   function renderConverters(){
@@ -413,18 +517,54 @@
     content.innerHTML=`
       <div class="tool-section">
         <h2>${escapeHtml(t("pathModifier","Path Modifier"))}</h2>
-        <textarea id="pathInput" class="tool-textarea" placeholder="FortniteGame/Content/.../Asset.uasset"></textarea>
+        <p class="tool-note">${escapeHtml(t("pathNote","Convert Fortnite file paths to Unreal object paths."))}</p>
+
+        <textarea
+          id="pathInput"
+          class="tool-textarea"
+          placeholder="FortniteGame/Content/.../Asset.uasset"
+        ></textarea>
+
         <div class="tool-actions">
-          <label class="tool-note"><input id="addClass" type="checkbox" /> ${escapeHtml(t("addClass","Add _C"))}</label>
+          <button id="formatPathBtn" class="tool-button primary" type="button">
+            ${escapeHtml(t("format","Format"))}
+          </button>
+
+          <button id="addClassPathBtn" class="tool-button" type="button">
+            ${escapeHtml(t("addClassAction","Add _C"))}
+          </button>
         </div>
-        <button id="convertPathBtn" class="tool-button primary" type="button">Convert</button>
-        <textarea id="pathOutput" class="tool-textarea" readonly></textarea>
-        <div class="tool-actions"><button id="copyPathOutput" class="tool-button" type="button">${escapeHtml(t("copy","Copy"))}</button></div>
+
+        <textarea
+          id="pathOutput"
+          class="tool-textarea"
+          readonly
+          placeholder="${escapeAttr(t("convertedPath","Converted path will appear here"))}"
+        ></textarea>
+
+        <div class="tool-actions">
+          <button id="copyPathOutput" class="tool-button" type="button">
+            ${escapeHtml(t("copy","Copy"))}
+          </button>
+        </div>
       </div>`;
-    const input=content.querySelector("#pathInput"),output=content.querySelector("#pathOutput");
-    content.querySelector("#convertPathBtn").addEventListener("click",()=>output.value=modifyPath(input.value,content.querySelector("#addClass").checked));
-    content.querySelector("#copyPathOutput").addEventListener("click",()=>copy(output.value));
+
+    const input=content.querySelector("#pathInput");
+    const output=content.querySelector("#pathOutput");
+
+    content.querySelector("#formatPathBtn").addEventListener("click",()=>{
+      output.value=modifyPath(input.value,false);
+    });
+
+    content.querySelector("#addClassPathBtn").addEventListener("click",()=>{
+      output.value=modifyPath(input.value,true);
+    });
+
+    content.querySelector("#copyPathOutput").addEventListener("click",()=>{
+      copy(output.value);
+    });
   }
+
   function modifyPath(raw,addClass){
     let path=String(raw||"").trim().replace(/^\.?\//,"");if(!path)return"";
     if(path.startsWith("FortniteGame/Content/")) path="/Game/"+path.slice("FortniteGame/Content/".length);
@@ -549,7 +689,50 @@
       </div>`;
   }
   function pathRow(label,value){return `<div class="path-row"><div class="path-label">${escapeHtml(label)}</div><div class="path-value" title="${escapeAttr(value)}">${escapeHtml(value)}</div><button class="path-copy" type="button" data-copy="${escapeAttr(value)}">COPY</button></div>`;}
-  function idCard(item){return `<div class="tool-card"><div class="tool-card-head">${item.image?`<img class="tool-card-image" src="${escapeAttr(item.image)}" alt="" loading="lazy" />`:`<div class="tool-card-image"></div>`}<div class="tool-card-title">${escapeHtml(item.name||item.title||"Unknown")}</div></div>${item.playset?pathRow("PLAYSET",item.playset):""}${item.plot?pathRow("PLOT",item.plot):""}${item.path?pathRow("PATH",item.path):""}</div>`;}
+  function idImageUrl(item){
+    const raw=String(item?.image||"").trim();
+    if(!raw)return "";
+
+    if(/^https?:\/\//i.test(raw))return raw;
+
+    let relative=raw.replace(/\\/g,"/");
+    relative=relative.replace(/^(\.\.\/)+/,"");
+    relative=relative.replace(/^\.?\//,"");
+    relative=relative.replace(/^images\//,"");
+
+    if(!relative)return "";
+
+    const encoded=relative
+      .split("/")
+      .map(part=>encodeURIComponent(part))
+      .join("/");
+
+    return `https://raw.githubusercontent.com/Th3DryZ69/FortniteToolsWeb/main/public/images/${encoded}`;
+  }
+
+  function bindIdImageFallbacks(root){
+    root.querySelectorAll("img.id-image").forEach(img=>{
+      if(img.dataset.fallbackBound)return;
+      img.dataset.fallbackBound="1";
+      img.addEventListener("error",()=>img.remove(),{once:true});
+    });
+  }
+
+  function idCard(item){
+    const image=idImageUrl(item);
+
+    return `<div class="tool-card">
+      <div class="tool-card-head">
+        ${image
+          ?`<img class="tool-card-image id-image" src="${escapeAttr(image)}" alt="" loading="lazy" />`
+          :`<div class="tool-card-image"></div>`}
+        <div class="tool-card-title">${escapeHtml(item.name||item.title||"Unknown")}</div>
+      </div>
+      ${item.playset?pathRow("PLAYSET",item.playset):""}
+      ${item.plot?pathRow("PLOT",item.plot):""}
+      ${item.path?pathRow("PATH",item.path):""}
+    </div>`;
+  }
   function normalizeDeviceData(data){
     if(!data||typeof data!=="object")return [];
 
@@ -566,6 +749,129 @@
       const item=value&&typeof value==="object"?value:{};
       return {name,...item};
     });
+  }
+
+  function sortDevicesLikeTh3Dry(list){
+    return [...list].sort((a,b)=>{
+      const aName=String(a?.name||"");
+      const bName=String(b?.name||"");
+
+      const aLatin=/^[a-zA-Z]/.test(aName);
+      const bLatin=/^[a-zA-Z]/.test(bName);
+
+      if(aLatin&&!bLatin)return -1;
+      if(!aLatin&&bLatin)return 1;
+
+      return aName.localeCompare(bName,undefined,{sensitivity:"base"});
+    });
+  }
+
+  function shortPlayset(value){
+    const raw=String(value||"");
+    if(!raw)return "";
+    return raw.split(".").pop()||raw;
+  }
+
+  function deviceSettingsRows(settings){
+    const entries=Object.entries(settings||{});
+    if(!entries.length)return "";
+
+    return `
+      <div class="device-settings-table">
+        ${entries.map(([settingName,settingData])=>{
+          const key=String(settingData?.["option key"]||"");
+          const value=String(settingData?.value||"");
+
+          return `
+            <div class="device-setting-row">
+              <div class="device-setting-name" title="${escapeAttr(settingName)}">
+                ${escapeHtml(settingName)}
+              </div>
+
+              <div class="device-setting-fields">
+                <div class="device-setting-field">
+                  <span class="device-field-tag">Key</span>
+                  <span class="device-field-value" title="${escapeAttr(key)}">${escapeHtml(key)}</span>
+                  ${key?`<button class="path-copy" type="button" data-copy="${escapeAttr(key)}">COPY</button>`:""}
+                </div>
+
+                <div class="device-setting-field">
+                  <span class="device-field-tag">Val</span>
+                  <span class="device-field-value" title="${escapeAttr(value)}">${escapeHtml(value)}</span>
+                  ${value?`<button class="path-copy" type="button" data-copy="${escapeAttr(value)}">COPY</button>`:""}
+                </div>
+              </div>
+            </div>`;
+        }).join("")}
+      </div>`;
+  }
+
+  function deviceCardSimple(item){
+    const title=item.name||item.title||item.device||item.id||"Device";
+    const image=deviceImageUrl(item);
+    const playset=String(item.playset||"");
+    const path=String(item.path||"");
+
+    return `
+      <div class="tool-card th3-device-card">
+        <div class="tool-card-head th3-device-head">
+          ${image
+            ?`<img class="tool-card-image device-image" src="${escapeAttr(image)}" alt="${escapeAttr(title)}" loading="lazy" />`
+            :`<div class="tool-card-image device-image-placeholder">📦</div>`}
+
+          <div class="th3-device-header-text">
+            <div class="tool-card-title" title="${escapeAttr(title)}">${escapeHtml(title)}</div>
+
+            ${playset?`
+              <div class="device-playset-short">
+                <span class="device-playset-value" title="${escapeAttr(playset)}">
+                  ${escapeHtml(shortPlayset(playset))}
+                </span>
+                <button class="path-copy" type="button" data-copy="${escapeAttr(playset)}">COPY</button>
+              </div>`:""}
+          </div>
+        </div>
+
+        ${path?pathRow("PATH",path):""}
+      </div>`;
+  }
+
+  function deviceCardLikeTh3Dry(item){
+    const title=item.name||item.title||item.device||item.id||"Device";
+    const image=deviceImageUrl(item);
+    const playset=String(item.playset||"");
+    const path=String(item.path||"");
+    const important=String(item.important||"").trim();
+
+    return `
+      <div class="tool-card th3-device-card">
+        <div class="tool-card-head th3-device-head">
+          ${image
+            ?`<img class="tool-card-image device-image" src="${escapeAttr(image)}" alt="${escapeAttr(title)}" loading="lazy" />`
+            :`<div class="tool-card-image device-image-placeholder">📦</div>`}
+
+          <div class="th3-device-header-text">
+            <div class="tool-card-title" title="${escapeAttr(title)}">${escapeHtml(title)}</div>
+
+            ${playset?`
+              <div class="device-playset-short">
+                <span class="device-playset-value" title="${escapeAttr(playset)}">
+                  ${escapeHtml(shortPlayset(playset))}
+                </span>
+                <button class="path-copy" type="button" data-copy="${escapeAttr(playset)}">COPY</button>
+              </div>`:""}
+          </div>
+        </div>
+
+        ${important?`
+          <div class="device-important">
+            ⚠️ ${escapeHtml(important)}
+          </div>`:""}
+
+        ${path?pathRow("PATH",path):""}
+
+        ${deviceSettingsRows(item.settings)}
+      </div>`;
   }
 
   function deviceImageUrl(item){
