@@ -54,11 +54,14 @@
   function renderAssets(){
     content.innerHTML=`
       <div class="tool-section">
-        <h2>Fortnite Files</h2>
+        <h2>Manual Search</h2>
+        <p class="tool-note">Search the full local Fortnite files database manually.</p>
+
         <div class="tool-searchbar">
-          <input id="assetQuery" placeholder="Search the full Fortnite database" />
+          <input id="assetQuery" placeholder="Search a path, asset, SM_, M_, MI_..." />
           <button id="assetSearch" class="tool-button primary" type="button">Search</button>
         </div>
+
         <div class="tool-subtabs">
           <button class="tool-subtab active" data-scope="all">All</button>
           <button class="tool-subtab" data-scope="sm">SM_</button>
@@ -66,27 +69,99 @@
           <button class="tool-subtab" data-scope="meshes">Meshes</button>
           <button class="tool-subtab" data-scope="new">New</button>
         </div>
+
         <div id="assetResults" class="tool-empty">Type something to search.</div>
+      </div>
+
+      <div class="tool-section">
+        <h2>Path Modifier</h2>
+        <p class="tool-note">Convert Fortnite file paths to Unreal object paths.</p>
+
+        <textarea
+          id="homePathInput"
+          class="tool-textarea"
+          placeholder="FortniteGame/Content/.../Asset.uasset"
+        ></textarea>
+
+        <div class="tool-actions">
+          <label class="tool-note">
+            <input id="homeAddClass" type="checkbox" />
+            Add _C
+          </label>
+        </div>
+
+        <button id="homeConvertPathBtn" class="tool-button primary" type="button">Convert</button>
+
+        <textarea
+          id="homePathOutput"
+          class="tool-textarea"
+          readonly
+          placeholder="Converted path will appear here"
+        ></textarea>
+
+        <div class="tool-actions">
+          <button id="homeCopyPathOutput" class="tool-button" type="button">Copy</button>
+        </div>
       </div>`;
+
     let scope="all";
-    const input=content.querySelector("#assetQuery"),results=content.querySelector("#assetResults");
+
+    const input=content.querySelector("#assetQuery");
+    const results=content.querySelector("#assetResults");
+
     content.querySelector(".tool-subtabs").addEventListener("click",(e)=>{
-      const b=e.target.closest("[data-scope]");if(!b)return;
-      scope=b.dataset.scope;[...content.querySelectorAll(".tool-subtab")].forEach(x=>x.classList.toggle("active",x===b));
+      const b=e.target.closest("[data-scope]");
+      if(!b)return;
+
+      scope=b.dataset.scope;
+      [...content.querySelectorAll(".tool-subtab")]
+        .forEach(x=>x.classList.toggle("active",x===b));
     });
+
     const run=async()=>{
-      const q=input.value.trim();if(!q)return;
-      results.className="tool-empty";results.textContent="Searching...";
+      const q=input.value.trim();
+      if(!q)return;
+
+      results.className="tool-empty";
+      results.textContent="Searching...";
+
       try{
         const data=await window.FortniteAgent.searchDatabase(scope,q);
-        if(!data.results?.length){results.textContent="No close results found.";return;}
+
+        if(!data.results?.length){
+          results.textContent="No close results found.";
+          return;
+        }
+
         results.className="";
-        results.innerHTML=data.results.slice(0,80).map(x=>pathCard(x.path,x.source)).join("");
+        results.innerHTML=data.results
+          .slice(0,80)
+          .map(x=>pathCard(x.path,x.source))
+          .join("");
+
         bindCopyButtons(results);
-      }catch(e){results.className="tool-empty";results.textContent=e.message||"Search failed.";}
+      }catch(e){
+        results.className="tool-empty";
+        results.textContent=e.message||"Search failed.";
+      }
     };
+
     content.querySelector("#assetSearch").addEventListener("click",run);
-    input.addEventListener("keydown",e=>{if(e.key==="Enter")run();});
+    input.addEventListener("keydown",e=>{
+      if(e.key==="Enter")run();
+    });
+
+    const pathInput=content.querySelector("#homePathInput");
+    const pathOutput=content.querySelector("#homePathOutput");
+    const addClass=content.querySelector("#homeAddClass");
+
+    content.querySelector("#homeConvertPathBtn").addEventListener("click",()=>{
+      pathOutput.value=modifyPath(pathInput.value,addClass.checked);
+    });
+
+    content.querySelector("#homeCopyPathOutput").addEventListener("click",()=>{
+      copy(pathOutput.value);
+    });
   }
 
   async function renderIds(){
