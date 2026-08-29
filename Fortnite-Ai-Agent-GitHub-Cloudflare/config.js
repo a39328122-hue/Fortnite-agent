@@ -3,6 +3,7 @@ window.FORTNITE_AI_API_ENDPOINT =
 
 window.FORTNITE_AI_DB = {
   raw: "./database/fortnite_assets.gz",
+  newRaw: "./database/fortnite_assets_new.gz",
   all: "./database/index/all.txt.gz",
   sm: "./database/index/sm.txt.gz",
   m: "./database/index/m.txt.gz",
