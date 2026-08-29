@@ -8,6 +8,8 @@
   --muted:#8d8d8d;
   --safe-top:env(safe-area-inset-top,0px);
   --safe-bottom:env(safe-area-inset-bottom,0px);
+  --app-height:100dvh;
+  --app-top:0px;
 }
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;height:100%;background:#000;color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Arial,sans-serif;-webkit-text-size-adjust:100%;text-size-adjust:100%}
@@ -17,11 +19,17 @@ button{color:inherit}
 [hidden]{display:none!important}
 
 .app-shell{
-  position:fixed;inset:0;
-  height:100dvh;min-height:100svh;
+  position:fixed;
+  left:0;
+  right:0;
+  top:var(--app-top,0px);
+  bottom:auto;
+  height:var(--app-height,100dvh);
+  min-height:0;
   display:grid;
   grid-template-rows:calc(52px + var(--safe-top)) minmax(0,1fr) auto;
-  background:#000
+  background:#000;
+  overflow:hidden
 }
 .topbar{
   grid-row:1;display:grid;grid-template-columns:46px 1fr 46px;align-items:end;
@@ -60,6 +68,7 @@ button{color:inherit}
 .generated-file-download{border:1px solid #333;background:#222;border-radius:9px;padding:8px 10px;font-size:12px}
 
 .composer{
+  position:relative;
   grid-row:3;padding:7px 9px calc(7px + var(--safe-bottom));
   background:linear-gradient(180deg,rgba(0,0,0,0),#000 20%);z-index:30
 }
@@ -119,15 +128,27 @@ button{color:inherit}
 .api-toggle{border:0;background:#252525;color:#ddd;border-radius:8px;padding:7px 9px}
 .login-back{border:0;background:transparent;color:#eee;font-size:22px}
 
-/* Plugin menu: always attached to the composer/visible keyboard viewport */
+/* Plugin menu: attached directly above the typebox */
 .plugin-menu{
-  position:fixed;z-index:2147483000;
-  width:min(500px,calc(100vw - 18px));
-  overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;
-  -webkit-overflow-scrolling:touch;touch-action:pan-y;
-  padding:6px;border:1px solid #343434;border-radius:18px;
-  background:rgba(12,12,12,.99);box-shadow:0 18px 55px rgba(0,0,0,.55);
-  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)
+  position:absolute;
+  z-index:2147483000;
+  left:50%;
+  bottom:calc(100% + 7px);
+  transform:translateX(-50%);
+  width:min(780px,calc(100% - 18px));
+  max-height:320px;
+  overflow-x:hidden;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+  touch-action:pan-y;
+  padding:6px;
+  border:1px solid #343434;
+  border-radius:18px;
+  background:rgba(12,12,12,.99);
+  box-shadow:0 18px 55px rgba(0,0,0,.55);
+  backdrop-filter:blur(18px);
+  -webkit-backdrop-filter:blur(18px)
 }
 .plugin-panel-header{display:flex;align-items:center;justify-content:space-between;min-height:40px;padding:0 9px}
 .plugin-panel-header strong{font-size:14px}
@@ -148,7 +169,16 @@ button{color:inherit}
 .plugin-info small{font-size:10px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* More Tools */
-.tools-overlay{position:fixed;z-index:1000;inset:0;height:100dvh;background:#000;overflow:hidden}
+.tools-overlay{
+  position:fixed;
+  z-index:1000;
+  left:0;
+  right:0;
+  top:var(--app-top,0px);
+  height:var(--app-height,100dvh);
+  background:#000;
+  overflow:hidden
+}
 .tools-shell{
   height:100%;min-height:0;display:grid;
   grid-template-rows:calc(52px + var(--safe-top)) auto auto minmax(0,1fr)
@@ -338,4 +368,261 @@ button{color:inherit}
 .sidebar,
 .sidebar * {
   touch-action:manipulation;
+}
+
+/* ===== Settings ===== */
+.settings-overlay{
+  position:fixed;
+  z-index:2000;
+  left:0;
+  right:0;
+  top:var(--app-top,0px);
+  height:var(--app-height,100dvh);
+  background:#000;
+  overflow:hidden
+}
+
+.settings-shell{
+  height:100%;
+  display:grid;
+  grid-template-rows:calc(52px + var(--safe-top)) minmax(0,1fr)
+}
+
+.settings-header{
+  display:grid;
+  grid-template-columns:42px 1fr 42px;
+  align-items:end;
+  padding:var(--safe-top) 8px 6px;
+  border-bottom:1px solid #181818;
+  background:#050505
+}
+
+.settings-title{
+  text-align:center;
+  font-weight:800;
+  font-size:15px;
+  line-height:40px
+}
+
+.settings-content{
+  width:min(700px,100%);
+  margin:auto;
+  min-height:0;
+  overflow:auto;
+  padding:18px 12px calc(28px + var(--safe-bottom));
+  -webkit-overflow-scrolling:touch
+}
+
+.settings-card{
+  width:100%;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:14px;
+  margin-bottom:10px;
+  color:#eee;
+  text-decoration:none;
+  background:linear-gradient(180deg,#151515,#0f0f0f);
+  border:1px solid #2a2a2a;
+  border-radius:18px
+}
+
+.settings-card-icon{
+  flex:0 0 42px;
+  width:42px;
+  height:42px;
+  display:grid;
+  place-items:center;
+  border:1px solid #303030;
+  border-radius:13px;
+  background:#1c1c1c;
+  font-size:15px;
+  font-weight:850
+}
+
+.settings-card-main{flex:1;min-width:0}
+.settings-card h2{margin:0;font-size:14px}
+.settings-card p{margin:4px 0 0;color:#858585;font-size:11px}
+.settings-arrow{font-size:24px;color:#666}
+
+.language-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:7px;
+  margin-top:12px
+}
+
+.language-choice{
+  min-width:0;
+  min-height:58px;
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  gap:2px;
+  border:1px solid #303030;
+  border-radius:13px;
+  background:#0d0d0d;
+  color:#ddd
+}
+
+.language-choice strong{font-size:12px}
+.language-choice small{color:#707070;font-size:9px}
+.language-choice.active{background:#efefef;color:#111;border-color:#efefef}
+.language-choice.active small{color:#555}
+
+.login-language-block{
+  margin:14px 0 5px;
+  padding:11px;
+  border:1px solid #292929;
+  border-radius:14px;
+  background:#0b0b0b
+}
+
+.login-language-title{color:#999;font-size:11px;margin-bottom:7px}
+.language-grid.compact .language-choice{min-height:48px}
+
+html[dir="rtl"] .sidebar-action,
+html[dir="rtl"] .sidebar-link,
+html[dir="rtl"] .recent-item{text-align:right}
+
+html[dir="rtl"] .assistant-content,
+html[dir="rtl"] .user-bubble{direction:rtl;text-align:right}
+
+/* ===== Manual Search JSON Viewer ===== */
+.json-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:7px;
+  padding:8px 9px;
+  border-top:1px solid #222
+}
+
+.json-view-button{
+  border:1px solid #343434;
+  background:#191919;
+  color:#eee;
+  border-radius:9px;
+  padding:7px 10px;
+  font-size:10px;
+  font-weight:800
+}
+
+.json-view-button:disabled{opacity:.5}
+
+.json-panel{
+  border-top:1px solid #222;
+  background:#090909
+}
+
+.json-panel-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:8px 10px;
+  color:#8e8e8e;
+  font-size:10px
+}
+
+.json-panel pre{
+  margin:0;
+  padding:11px;
+  max-height:380px;
+  overflow:auto;
+  -webkit-overflow-scrolling:touch;
+  color:#d8d8d8;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:10px;
+  line-height:1.55;
+  white-space:pre
+}
+
+.tool-external-link{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:40px;
+  padding:0 12px;
+  margin:0 0 12px;
+  border:1px solid #343434;
+  border-radius:11px;
+  background:#151515;
+  color:#eee;
+  text-decoration:none;
+  font-size:11px;
+  font-weight:800
+}
+
+/* ===== FNAA photo branding ===== */
+.brand-with-avatar{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  min-width:0;
+}
+
+.brand-avatar{
+  width:28px;
+  height:28px;
+  flex:0 0 28px;
+  display:block;
+  border-radius:50%;
+  object-fit:cover;
+  object-position:center;
+  border:1px solid #303030;
+  background:#111;
+}
+
+.topbar-brand{
+  justify-self:center;
+  justify-content:center;
+  line-height:normal;
+  white-space:nowrap;
+}
+
+.topbar-brand .brand-avatar{
+  width:24px;
+  height:24px;
+  flex-basis:24px;
+}
+
+.login-brand{
+  justify-content:flex-start;
+  margin:0 0 7px;
+}
+
+.login-brand-avatar{
+  width:36px;
+  height:36px;
+  flex-basis:36px;
+}
+
+.assistant-brand{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
+.assistant-avatar{
+  width:22px;
+  height:22px;
+  flex:0 0 22px;
+  display:block;
+  border-radius:50%;
+  object-fit:cover;
+  object-position:center;
+  border:1px solid #2c2c2c;
+  background:#111;
+}
+
+@media (max-width:380px){
+  .topbar-brand{
+    font-size:12px;
+  }
+
+  .topbar-brand .brand-avatar{
+    width:22px;
+    height:22px;
+    flex-basis:22px;
+  }
 }
