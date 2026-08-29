@@ -328,3 +328,14 @@ button{color:inherit}
     font-size:11px;
   }
 }
+
+/* ===== Sidebar touch / click-through fix ===== */
+.sidebar.open ~ .topbar,
+.sidebar.open ~ .composer {
+  pointer-events:none;
+}
+
+.sidebar,
+.sidebar * {
+  touch-action:manipulation;
+}
