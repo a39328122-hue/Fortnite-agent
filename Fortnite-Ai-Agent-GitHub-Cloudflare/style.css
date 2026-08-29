@@ -1,4 +1,4 @@
-:root{
+{
   color-scheme:dark;
   --bg:#000;
   --panel:#101010;
@@ -123,7 +123,8 @@ button{color:inherit}
 .plugin-menu{
   position:fixed;z-index:2147483000;
   width:min(500px,calc(100vw - 18px));
-  overflow:auto;overscroll-behavior:contain;
+  overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;touch-action:pan-y;
   padding:6px;border:1px solid #343434;border-radius:18px;
   background:rgba(12,12,12,.99);box-shadow:0 18px 55px rgba(0,0,0,.55);
   backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)
@@ -133,7 +134,8 @@ button{color:inherit}
 .plugin-panel-badge{padding:4px 8px;border:1px solid #333;border-radius:999px;color:#888;font-size:9px}
 .plugin-option{
   width:100%;min-height:52px;display:flex;align-items:center;gap:10px;padding:7px 10px;border:0;
-  border-radius:13px;background:transparent;color:#eee;text-align:left
+  border-radius:13px;background:transparent;color:#eee;text-align:left;
+  touch-action:pan-y;-webkit-user-select:none;user-select:none
 }
 .plugin-option.selected,.plugin-option:active{background:#242424}
 .plugin-icon{
