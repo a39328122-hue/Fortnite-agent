@@ -21,16 +21,16 @@
   const $ = (id) => document.getElementById(id);
   const els = {
     sidebar:$("sidebar"), scrim:$("scrim"), openSidebar:$("openSidebar"), closeSidebar:$("closeSidebar"),
-    newChatBtn:$("newChatBtn"), moreToolsBtn:$("moreToolsBtn"), discordTop:$("discordTop"),
+    newChatBtn:$("newChatBtn"), moreToolsBtn:$("moreToolsBtn"), settingsBtn:$("settingsBtn"), discordTop:$("discordTop"),
     recentList:$("recentList"), chat:$("chat"), welcome:$("welcome"), messages:$("messages"),
     composer:$("composer"), input:$("messageInput"), send:$("sendButton"), toast:$("toast"),
-    loginGate:$("loginGate")
+    loginGate:$("loginGate"), settingsOverlay:$("settingsOverlay"), settingsBackBtn:$("settingsBackBtn")
   };
 
   const pluginMenu = document.createElement("div");
   pluginMenu.className = "plugin-menu";
   pluginMenu.hidden = true;
-  document.body.appendChild(pluginMenu);
+  els.composer.appendChild(pluginMenu);
 
   let chats = loadChats();
   let activeId = localStorage.getItem(ACTIVE_KEY) || null;
@@ -45,6 +45,16 @@
   setupEvents();
   renderAll();
   maybeShowLoginGate();
+  syncVisualViewport();
+
+  function syncVisualViewport(){
+    const vv=window.visualViewport;
+    const height=Math.round(vv?.height||window.innerHeight);
+    const top=Math.round(vv?.offsetTop||0);
+
+    document.documentElement.style.setProperty("--app-height",`${height}px`);
+    document.documentElement.style.setProperty("--app-top",`${top}px`);
+  }
 
   function setupEvents(){
     els.openSidebar.addEventListener("click", openSidebar);
@@ -68,6 +78,15 @@
         showToast("More Tools failed to load", true);
       }
     });
+
+    els.settingsBtn.addEventListener("click",(event)=>{
+      event.preventDefault();
+      event.stopPropagation();
+      closeSidebar();
+      openSettings();
+    });
+
+    els.settingsBackBtn.addEventListener("click",closeSettings);
 
     els.discordTop.addEventListener("click", async () => {
       try { await navigator.clipboard.writeText("@its.swag"); showToast("Copied @its.swag"); }
@@ -116,11 +135,17 @@
       }
     });
 
-    window.addEventListener("resize", positionPluginMenu);
-    window.addEventListener("orientationchange", () => setTimeout(positionPluginMenu, 120));
-    if (window.visualViewport) {
-      visualViewport.addEventListener("resize", positionPluginMenu);
-      visualViewport.addEventListener("scroll", positionPluginMenu);
+    const handleViewportChange=()=>{
+      syncVisualViewport();
+      positionPluginMenu();
+    };
+
+    window.addEventListener("resize",handleViewportChange);
+    window.addEventListener("orientationchange",()=>setTimeout(handleViewportChange,120));
+
+    if(window.visualViewport){
+      visualViewport.addEventListener("resize",handleViewportChange);
+      visualViewport.addEventListener("scroll",handleViewportChange);
     }
   }
 
@@ -191,8 +216,17 @@
     const wrap=document.createElement("div");
     wrap.className="assistant-wrap";
     const name=document.createElement("div");
-    name.className="assistant-name";
-    name.textContent="Fortnite Ai Agent";
+    name.className="assistant-name assistant-brand";
+
+    const avatar=document.createElement("img");
+    avatar.className="assistant-avatar";
+    avatar.src="./assets/fnaa-avatar.jpeg";
+    avatar.alt="";
+
+    const brandText=document.createElement("span");
+    brandText.textContent="Fortnite Ai Agent";
+
+    name.append(avatar,brandText);
     const content=document.createElement("div");
     content.className="assistant-content";
     renderMarkdown(content,message.content);
@@ -405,26 +439,12 @@
 
   function positionPluginMenu(){
     if(pluginMenu.hidden)return;
+
     const vv=window.visualViewport;
-    const viewTop=vv?vv.offsetTop:0;
-    const viewHeight=vv?vv.height:window.innerHeight;
-    const viewBottom=viewTop+viewHeight;
-    const composerRect=els.composer.getBoundingClientRect();
-    const innerRect=els.composer.querySelector(".composer-inner")?.getBoundingClientRect()||composerRect;
-    const margin=9;
+    const visibleHeight=vv?.height||window.innerHeight;
+    const maxHeight=Math.max(150,Math.min(320,visibleHeight*0.46));
 
-    const width=Math.min(500,Math.max(260,innerRect.width));
-    pluginMenu.style.width=`${Math.min(width,window.innerWidth-margin*2)}px`;
-    const left=Math.max(margin,Math.min(innerRect.left,window.innerWidth-pluginMenu.offsetWidth-margin));
-    pluginMenu.style.left=`${left}px`;
-
-    const anchorTop=Math.min(composerRect.top,viewBottom-58);
-    const room=Math.max(140,anchorTop-viewTop-margin*2);
-    pluginMenu.style.maxHeight=`${Math.min(330,room)}px`;
-
-    const menuHeight=Math.min(pluginMenu.scrollHeight,parseFloat(pluginMenu.style.maxHeight)||330);
-    const top=Math.max(viewTop+margin,anchorTop-menuHeight-7);
-    pluginMenu.style.top=`${top}px`;
+    pluginMenu.style.maxHeight=`${maxHeight}px`;
   }
 
   function movePluginSelection(dir){
@@ -457,11 +477,22 @@
   function addTypingIndicator(){
     removeTypingIndicator();
     const a=document.createElement("article");a.id="typingIndicator";a.className="message assistant";
-    a.innerHTML='<div class="assistant-wrap"><div class="assistant-name">Fortnite Ai Agent</div><div class="assistant-content"><p>Thinking...</p></div></div>';
+    a.innerHTML='<div class="assistant-wrap"><div class="assistant-name assistant-brand"><img class="assistant-avatar" src="./assets/fnaa-avatar.jpeg" alt="" /><span>Fortnite Ai Agent</span></div><div class="assistant-content"><p>Thinking...</p></div></div>';
     els.messages.append(a);scrollToBottom();
   }
   function removeTypingIndicator(){$("typingIndicator")?.remove();}
   function scrollToBottom(){els.chat.scrollTop=els.chat.scrollHeight;}
+  function openSettings(){
+    els.settingsOverlay.hidden=false;
+    els.settingsOverlay.setAttribute("aria-hidden","false");
+    window.FortniteI18n?.apply(els.settingsOverlay);
+  }
+
+  function closeSettings(){
+    els.settingsOverlay.hidden=true;
+    els.settingsOverlay.setAttribute("aria-hidden","true");
+  }
+
   function openSidebar(){els.sidebar.classList.add("open");els.scrim.classList.add("show");els.sidebar.setAttribute("aria-hidden","false");}
   function closeSidebar(){els.sidebar.classList.remove("open");els.scrim.classList.remove("show");els.sidebar.setAttribute("aria-hidden","true");}
   function showToast(text,isError=false){
@@ -482,11 +513,25 @@
     els.loginGate.hidden=false;
     els.loginGate.innerHTML=`
       <div class="login-card">
-        <h1>Fortnite Ai Agent</h1>
-        <p>Use your own Groq key or continue as Guest.</p>
-        <button class="login-primary" id="loginOwnKey" type="button">Log in</button>
-        <button class="login-secondary" id="loginGuest" type="button">Guest</button>
+        <h1 class="login-brand brand-with-avatar">
+          <img class="brand-avatar login-brand-avatar" src="./assets/fnaa-avatar.jpeg" alt="" />
+          <span data-i18n="brand">Fortnite Ai Agent</span>
+        </h1>
+        <p data-i18n="loginDescription">Use your own Groq key or continue as Guest.</p>
+
+        <div class="login-language-block">
+          <div class="login-language-title" data-i18n="language">Language</div>
+          <div class="language-grid compact">
+            <button type="button" class="language-choice" data-set-language="en"><strong>English</strong><small>EN</small></button>
+            <button type="button" class="language-choice" data-set-language="fr"><strong>Français</strong><small>FR</small></button>
+            <button type="button" class="language-choice" data-set-language="ar"><strong>العربية</strong><small>AR</small></button>
+          </div>
+        </div>
+
+        <button class="login-primary" id="loginOwnKey" type="button" data-i18n="login">Log in</button>
+        <button class="login-secondary" id="loginGuest" type="button" data-i18n="guest">Guest</button>
       </div>`;
+    window.FortniteI18n?.apply(els.loginGate);
     $("loginOwnKey").addEventListener("click",showApiLogin);
     $("loginGuest").addEventListener("click",()=>{
       sessionStorage.setItem(LOGIN_MODE_SESSION,"guest");sessionStorage.removeItem(USER_API_KEY_SESSION);
@@ -498,15 +543,16 @@
     els.loginGate.innerHTML=`
       <div class="login-card">
         <button class="login-back" id="apiBack" type="button">‹</button>
-        <h1>Type ur API</h1>
-        <p>Groq key only. It stays in this browser session.</p>
+        <h1 data-i18n="apiTitle">Type ur API</h1>
+        <p data-i18n="apiDescription">Groq key only. It stays in this browser session.</p>
         <div class="api-input-wrap">
           <input id="apiKeyInput" type="password" placeholder="gsk_..." autocomplete="off" />
           <button id="apiToggle" class="api-toggle" type="button">Show</button>
         </div>
-        <button id="apiSave" class="login-primary" type="button">Continue</button>
-        <button id="apiCreate" class="login-secondary" type="button">Create one for free from Groq API</button>
+        <button id="apiSave" class="login-primary" type="button" data-i18n="continue">Continue</button>
+        <button id="apiCreate" class="login-secondary" type="button" data-i18n="createGroq">Create one for free from Groq API</button>
       </div>`;
+    window.FortniteI18n?.apply(els.loginGate);
     const input=$("apiKeyInput");
     $("apiBack").addEventListener("click",showWelcomeGate);
     $("apiToggle").addEventListener("click",()=>{
