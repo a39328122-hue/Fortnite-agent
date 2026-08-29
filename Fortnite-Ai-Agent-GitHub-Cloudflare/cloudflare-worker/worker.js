@@ -108,7 +108,8 @@ function cleanMessages(messages) {
 
 function isCurrentInfoQuery(messages) {
   const text = messages.map((m) => m.content).join(" ").toLowerCase();
-  return /\b(latest|today|current|new update|leak|leaks|rumor|rumour|recent|this season|patch notes|just added)\b|ØªØ³Ø±ÙØ¨|ØªØ³Ø±ÙØ¨Ø§Øª|Ø´Ø§Ø¦Ø¹Ø©|Ø§Ø´Ø§Ø¹Ø©|Ø­Ø¯ÙØ«|Ø§Ø®Ø± ØªØ­Ø¯ÙØ«|Ø¢Ø®Ø± ØªØ­Ø¯ÙØ«|Ø­Ø§ÙÙØ§|Ø­Ø§ÙÙØ§Ù/.test(text);
+
+  return /\b(latest|today|current|new update|leak|leaks|rumor|rumour|recent|this season|patch notes|just added)\b|تسريب|تسريبات|شائعة|اشاعة|إشاعة|حديث|اخر تحديث|آخر تحديث|حاليا|حالياً/.test(text);
 }
 
 async function groqFetch(apiKey, body, timeoutMs = 42000) {
