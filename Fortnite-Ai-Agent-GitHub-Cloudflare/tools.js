@@ -1,4 +1,4 @@
-(() => {
+ => {
   "use strict";
 
   const overlay=document.getElementById("toolsOverlay");
@@ -110,21 +110,35 @@
 
   async function renderDevices(){
     if(!deviceData) deviceData=await fetchJson(DB.devices||"./database/devicemeshs.json");
-    const list=flattenObjects(deviceData);
+    const list=normalizeDeviceData(deviceData);
+
     content.innerHTML=`
       <div class="tool-section">
         <h2>Device Meshes</h2>
         <div class="tool-searchbar"><input id="deviceSearch" placeholder="Search device..." /></div>
         <div id="deviceResults">${list.slice(0,100).map(deviceCard).join("")}</div>
       </div>`;
+
     const input=content.querySelector("#deviceSearch"),results=content.querySelector("#deviceResults");
+
     input.addEventListener("input",()=>{
       const q=input.value.trim().toLowerCase();
-      const filtered=!q?list:list.filter(x=>JSON.stringify(x).toLowerCase().includes(q));
+      const filtered=!q?list:list.filter(x=>{
+        const hay=[
+          x.name,
+          x.path,
+          x.playset,
+          ...(Array.isArray(x.tag)?x.tag:[])
+        ].filter(Boolean).join(" ").toLowerCase();
+        return hay.includes(q);
+      });
       results.innerHTML=filtered.slice(0,160).map(deviceCard).join("")||'<div class="tool-empty">No results.</div>';
       bindCopyButtons(results);
+      bindImageFallbacks(results);
     });
+
     bindCopyButtons(results);
+    bindImageFallbacks(results);
   }
 
   function renderConverters(){
@@ -378,10 +392,65 @@
   function pathCard(path,source){return `<div class="tool-card"><div class="tool-card-head"><div class="tool-card-title">${source==="json"?"JSON reference":"Asset path"}</div></div>${pathRow(source==="json"?"JSON":"PATH",path)}</div>`;}
   function pathRow(label,value){return `<div class="path-row"><div class="path-label">${escapeHtml(label)}</div><div class="path-value" title="${escapeAttr(value)}">${escapeHtml(value)}</div><button class="path-copy" type="button" data-copy="${escapeAttr(value)}">COPY</button></div>`;}
   function idCard(item){return `<div class="tool-card"><div class="tool-card-head">${item.image?`<img class="tool-card-image" src="${escapeAttr(item.image)}" alt="" loading="lazy" />`:`<div class="tool-card-image"></div>`}<div class="tool-card-title">${escapeHtml(item.name||item.title||"Unknown")}</div></div>${item.playset?pathRow("PLAYSET",item.playset):""}${item.plot?pathRow("PLOT",item.plot):""}${item.path?pathRow("PATH",item.path):""}</div>`;}
+  function normalizeDeviceData(data){
+    if(!data||typeof data!=="object")return [];
+
+    if(Array.isArray(data)){
+      return data.map((value,index)=>{
+        if(value&&typeof value==="object"){
+          return {name:value.name||value.title||value.device||`Device ${index+1}`,...value};
+        }
+        return {name:String(value||`Device ${index+1}`)};
+      });
+    }
+
+    return Object.entries(data).map(([name,value])=>{
+      const item=value&&typeof value==="object"?value:{};
+      return {name,...item};
+    });
+  }
+
+  function deviceImageUrl(item){
+    const raw=String(item?.image||"").trim();
+    if(!raw)return "";
+
+    if(/^https?:\/\//i.test(raw))return raw;
+
+    const filename=raw.replace(/\/g,"/").split("/").pop();
+    if(!filename)return "";
+
+    return `https://raw.githubusercontent.com/Th3DryZ69/FortniteToolsWeb/main/public/images/devices/${encodeURIComponent(filename)}`;
+  }
+
   function deviceCard(item){
     const title=item.name||item.title||item.device||item.id||"Device";
-    const badges=[item.important?"important":"",item.dispo===false?"unavailable":""].filter(Boolean);
-    return `<div class="tool-card"><div class="tool-card-head">${item.image?`<img class="tool-card-image" src="${escapeAttr(item.image)}" alt="" loading="lazy" />`:`<div class="tool-card-image"></div>`}<div style="min-width:0;flex:1"><div class="tool-card-title">${escapeHtml(title)}</div>${badges.length?`<div class="device-badges">${badges.map(b=>`<span class="device-badge">${escapeHtml(b)}</span>`).join("")}</div>`:""}</div></div>${item.path?pathRow("PATH",item.path):""}${item.playset?pathRow("PLAYSET",item.playset):""}</div>`;
+    const image=deviceImageUrl(item);
+    const badges=[];
+
+    if(item.old===true)badges.push("old");
+    if(Array.isArray(item.tag))badges.push(...item.tag.filter(Boolean).slice(0,3));
+
+    return `<div class="tool-card">
+      <div class="tool-card-head">
+        ${image?`<img class="tool-card-image device-image" src="${escapeAttr(image)}" alt="" loading="lazy" />`:``}
+        <div style="min-width:0;flex:1">
+          <div class="tool-card-title">${escapeHtml(title)}</div>
+          ${badges.length?`<div class="device-badges">${badges.map(b=>`<span class="device-badge">${escapeHtml(b)}</span>`).join("")}</div>`:""}
+        </div>
+      </div>
+      ${item.path?pathRow("PATH",item.path):""}
+      ${item.playset?pathRow("PLAYSET",item.playset):""}
+    </div>`;
+  }
+
+  function bindImageFallbacks(root){
+    root.querySelectorAll("img.device-image").forEach(img=>{
+      if(img.dataset.fallbackBound)return;
+      img.dataset.fallbackBound="1";
+      img.addEventListener("error",()=>{
+        img.remove();
+      },{once:true});
+    });
   }
 
   function walkIdData(value,out,key=""){
@@ -390,13 +459,6 @@
     if(Array.isArray(value))value.forEach((v,i)=>walkIdData(v,out,String(i)));
     else Object.entries(value).forEach(([k,v])=>walkIdData(v,out,k));
   }
-  function flattenObjects(value){
-    if(Array.isArray(value))return value.flatMap(flattenObjects);
-    if(value&&typeof value==="object"){
-      const vals=Object.values(value);
-      if(vals.some(v=>typeof v!=="object"||v===null))return[value];
-      return vals.flatMap(flattenObjects);
-    }
     return[];
   }
   function bindCopyButtons(root){root.querySelectorAll("[data-copy]").forEach(b=>{if(b.dataset.bound)return;b.dataset.bound="1";b.addEventListener("click",()=>copy(b.dataset.copy||""));});}
