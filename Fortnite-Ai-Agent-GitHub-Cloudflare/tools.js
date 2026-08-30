@@ -464,11 +464,26 @@
   function toFilePath(path){
     let p=String(path||"").trim();
     if(!p)return p;
-    if(p.endsWith(".uasset"))return p;
+    if(/\.uasset$/i.test(p))return p;
+
     p=p.split(".")[0];
-    if(p.startsWith("/Game/")) return `FortniteGame/Content/${p.slice(6)}.uasset`;
+
+    // Already a Fortnite filesystem path: keep it and only restore .uasset.
+    if(/^FortniteGame\/Content\//i.test(p))return `${p}.uasset`;
+    if(/^FortniteGame\/Plugins\//i.test(p))return `${p}.uasset`;
+
+    if(p.startsWith("/Game/"))return `FortniteGame/Content/${p.slice(6)}.uasset`;
+
+    const plugin=p.match(/^(?:FortniteGame\/)?Plugins\/(?:GameFeatures\/)?([^/]+)\/Content\/(.+)$/i);
+    if(plugin){
+      return `FortniteGame/Plugins/GameFeatures/${plugin[1]}/Content/${plugin[2]}.uasset`;
+    }
+
     const parts=p.replace(/^\//,"").split("/");
-    if(parts.length>1) return `FortniteGame/Plugins/GameFeatures/${parts[0]}/Content/${parts.slice(1).join("/")}.uasset`;
+    if(parts.length>1){
+      return `FortniteGame/Plugins/GameFeatures/${parts[0]}/Content/${parts.slice(1).join("/")}.uasset`;
+    }
+
     return p;
   }
   function objectPath(path){
@@ -1054,16 +1069,17 @@
   /* ===== FNAA Epic Image Resolver =====
      Resolution order:
      1) confirmed local cache
-     2) requested path if it is already an image-like asset
-     3) direct Epic thumbnail/icon/preview reference from exported JSON
-     4) strict sibling image candidate from the local Fortnite path database
-     5) reverse lookup: related Gallery/Prefab/Playset/Creative asset whose JSON
+     2) Dilly /v1/export with ForceImage=true for the requested asset
+     3) requested path if it is already an image-like asset
+     4) direct Epic thumbnail/icon/preview reference from exported JSON
+     5) strict sibling image candidate from the local Fortnite path database
+     6) reverse lookup: related Gallery/Prefab/Playset/Creative asset whose JSON
         actually references the requested asset, then use its Epic image
-     6) No Image found / Error 404
+     7) No Image found / Error 404
 
      This intentionally does NOT render StaticMesh/SkeletalMesh geometry.
   */
-  const IMAGE_RESOLVER_CACHE_KEY="fortniteAiAgent.imageResolver.v2";
+  const IMAGE_RESOLVER_CACHE_KEY="fortniteAiAgent.imageResolver.v3.forceImage";
   const imageResolverJsonCache=new Map();
   const imageResolverProbeCache=new Map();
   const IMAGE_RELATED_LIMIT=32;
@@ -1225,12 +1241,83 @@
     return rankImageCandidates(data,"");
   }
 
+  function forceImageUrls(assetRef){
+    const ref=normalizeAssetReference(assetRef);
+    if(!ref)return [];
+
+    const clean=ref.includes(".")?ref.split(".")[0]:ref;
+    const fsPath=toFilePath(clean);
+    const paths=[];
+
+    // Dilly's documented ForceImage endpoint works with Fortnite file paths.
+    // Try the .uasset/file form first, then the Unreal package/object form as fallback.
+    if(fsPath)paths.push(fsPath);
+    if(clean&&clean!==fsPath)paths.push(clean);
+
+    return [...new Set(paths)].map(path=>
+      `${EXPORT_BASE}?Path=${encodeURIComponent(path)}&ForceImage=true`
+    );
+  }
+
+  async function requestForcedImage(assetRef){
+    const urls=forceImageUrls(assetRef);
+    if(!urls.length)return {state:"missing",confirmed404:false};
+
+    let confirmed404=0;
+    let temporaryError=null;
+
+    for(const url of urls){
+      try{
+        const response=await fetch(url,{
+          method:"GET",
+          headers:{
+            "Accept":"image/png,image/webp,image/*;q=0.9,*/*;q=0.1"
+          }
+        });
+
+        if(response.status===404){
+          confirmed404++;
+          continue;
+        }
+
+        if(!response.ok){
+          temporaryError=new Error(`ForceImage returned ${response.status}`);
+          continue;
+        }
+
+        const type=String(response.headers.get("content-type")||"").toLowerCase();
+        if(!type.startsWith("image/")){
+          temporaryError=new Error(`ForceImage returned ${type||"a non-image response"}`);
+          continue;
+        }
+
+        // Use the endpoint URL itself as <img src>. This avoids storing huge image data in FNAA.
+        return {state:"ready",url,status:response.status};
+      }catch(error){
+        temporaryError=error;
+      }
+    }
+
+    if(confirmed404===urls.length){
+      return {state:"missing",confirmed404:true};
+    }
+
+    if(temporaryError){
+      return {state:"error",error:temporaryError,confirmed404:confirmed404>0};
+    }
+
+    return {state:"missing",confirmed404:confirmed404>0};
+  }
+
   function previewImageUrls(assetRef){
     const ref=normalizeAssetReference(assetRef);
     if(!ref)return [];
 
     const clean=ref.includes(".")?ref.split(".")[0]:ref;
-    const urls=[`${EXPORT_BASE}?path=${encodeURIComponent(clean)}&raw=false`];
+    const urls=[...forceImageUrls(ref)];
+
+    // Keep the old raw=false texture export as a compatibility fallback.
+    urls.push(`${EXPORT_BASE}?path=${encodeURIComponent(clean)}&raw=false`);
 
     const fsPath=toFilePath(clean);
     if(fsPath&&fsPath!==clean){
@@ -1502,7 +1589,23 @@
     const cached=await cachedImageResolution(requested);
     if(cached)return cached;
 
-    // 2. The requested asset is itself an Epic image-like Texture2D path.
+    // 2. Strongest/lightest path: ask Dilly to return an image for the requested asset itself.
+    // A confirmed 404 is remembered only for this resolution attempt; other stages can still rescue
+    // the asset through an Epic thumbnail referenced by JSON/Creative data.
+    const forced=await requestForcedImage(requested);
+    const forceTemporaryError=forced.state==="error"?forced.error:null;
+
+    if(forced.state==="ready"&&forced.url){
+      const result={
+        url:forced.url,
+        assetRef:requested,
+        source:"Dilly ForceImage"
+      };
+      rememberImageResolution(requested,result);
+      return result;
+    }
+
+    // 3. If the requested asset already looks like an Epic image/Texture2D, try the legacy export too.
     if(isImageLikeAssetPath(requested)){
       const url=await firstWorkingPreviewUrl(requested);
       if(url){
@@ -1512,7 +1615,7 @@
       }
     }
 
-    // 3. Direct exported JSON references.
+    // 4. Direct exported JSON references.
     try{
       const data=await imageResolverExportJson(requested);
       for(const ref of rankImageCandidates(data,requested)){
@@ -1525,7 +1628,7 @@
       }
     }catch{}
 
-    // 4/5. Local DB name discovery, then strict checks to avoid random images.
+    // 5/6. Local DB name discovery, then strict checks to avoid random images.
     const related=await collectImageRelatedSearchResults(requested);
 
     const sibling=await resolveStrictSiblingImage(requested,related);
@@ -1540,6 +1643,9 @@
       return creative;
     }
 
+    // Do not turn a network/server failure into a fake "Image Not found / 404".
+    // Only a clean miss reaches null; temporary ForceImage errors remain retryable.
+    if(forceTemporaryError)throw forceTemporaryError;
     return null;
   }
 
