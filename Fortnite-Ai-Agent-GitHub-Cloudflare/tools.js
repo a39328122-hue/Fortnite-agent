@@ -1242,8 +1242,6 @@
     return rankImageCandidates(data,"");
   }
 
-  const imageWorkerObjectUrls=new Map();
-
   function workerImageRequestUrl(assetRef){
     if(!API_ENDPOINT)return "";
 
@@ -1254,60 +1252,19 @@
     const fsPath=toFilePath(clean);
     if(!fsPath)return "";
 
+    // The browser gives this URL directly to <img>. No fetch(), Blob, or object URL.
     return `${API_ENDPOINT}/image?path=${encodeURIComponent(fsPath)}`;
   }
 
   async function requestForcedImage(assetRef){
-    const requestUrl=workerImageRequestUrl(assetRef);
-    if(!requestUrl){
+    const url=workerImageRequestUrl(assetRef);
+    if(!url){
       return {state:"error",error:new Error("FNAA image Worker endpoint is not configured.")};
     }
 
-    const cacheKey=String(assetRef||"").toLowerCase();
-    const cached=imageWorkerObjectUrls.get(cacheKey);
-    if(cached)return {state:"ready",url:cached,status:200};
-
-    let response;
-    try{
-      response=await fetch(requestUrl,{
-        method:"GET",
-        mode:"cors",
-        cache:"no-store",
-        headers:{
-          "Accept":"image/png,image/webp,image/*;q=0.9,*/*;q=0.1",
-          "X-FNAA-Client":"web-v1"
-        }
-      });
-    }catch(error){
-      return {state:"error",error};
-    }
-
-    if(response.status===404){
-      return {state:"missing",confirmed404:true};
-    }
-
-    if(!response.ok){
-      return {state:"error",error:new Error(`Image Worker returned ${response.status}`)};
-    }
-
-    const type=String(response.headers.get("content-type")||"").toLowerCase();
-    if(!type.startsWith("image/")){
-      return {state:"error",error:new Error("Image Worker returned a non-image response.")};
-    }
-
-    const blob=await response.blob();
-    if(!blob.size){
-      return {state:"missing",confirmed404:true};
-    }
-
-    // Protect iPhone/Safari from unexpectedly huge responses.
-    if(blob.size>12*1024*1024){
-      return {state:"error",error:new Error("Image response is too large.")};
-    }
-
-    const objectUrl=URL.createObjectURL(blob);
-    imageWorkerObjectUrls.set(cacheKey,objectUrl);
-    return {state:"ready",url:objectUrl,status:response.status};
+    // Do not download/decode the image into JavaScript memory.
+    // loadImageUrl() will let Safari stream/decode it natively through <img>.
+    return {state:"ready",url,status:200};
   }
 
   function previewImageUrls(assetRef){
@@ -1669,8 +1626,14 @@
             return;
           }
 
-          if(!await loadImageUrl(img,result.url)){
-            throw new Error("Resolved image could not be loaded.");
+          if(!await loadImageUrl(img,result.url,18000)){
+            button.dataset.imageState="missing";
+            img.removeAttribute("src");
+            img.hidden=true;
+            status.hidden=false;
+            status.textContent=t("imageUnavailable","No Image found\nError 404");
+            if(meta){meta.hidden=true;meta.textContent="";}
+            return;
           }
 
           button.dataset.imageState="ready";
