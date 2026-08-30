@@ -157,6 +157,7 @@
 
         bindCopyButtons(results);
         bindJsonButtons(results);
+        bindMeshImageButtons(results);
       }catch(e){
         stopSearching();
         results.className="tool-empty";
@@ -431,14 +432,33 @@
     return (exact||data.results[0])?.path||null;
   }
 
+  const exportJsonCache=new Map();
+
   async function exportJson(path){
     if(!path)return null;
-    const fsPath=toFilePath(path);
-    const url=`${EXPORT_BASE}?path=${encodeURIComponent(fsPath)}&raw=true`;
-    const r=await fetch(url);
-    if(!r.ok)throw new Error(`Export service returned ${r.status}`);
-    const j=await r.json();
-    return j?.jsonOutput||[];
+
+    const cacheKey=String(path).trim();
+    if(exportJsonCache.has(cacheKey)){
+      return exportJsonCache.get(cacheKey);
+    }
+
+    const request=(async()=>{
+      const fsPath=toFilePath(cacheKey);
+      const url=`${EXPORT_BASE}?path=${encodeURIComponent(fsPath)}&raw=true`;
+      const r=await fetch(url);
+      if(!r.ok)throw new Error(`Export service returned ${r.status}`);
+      const j=await r.json();
+      return j?.jsonOutput||[];
+    })();
+
+    exportJsonCache.set(cacheKey,request);
+
+    try{
+      return await request;
+    }catch(error){
+      exportJsonCache.delete(cacheKey);
+      throw error;
+    }
   }
 
   function toFilePath(path){
@@ -657,9 +677,28 @@
     }catch{}
   }
 
+  function isLikelyMeshPath(path){
+    const value=String(path||"").trim();
+    if(!value)return false;
+
+    const clean=value.split(".")[0];
+    const name=(clean.split("/").pop()||"").toLowerCase();
+    const low=clean.toLowerCase();
+
+    return (
+      name.startsWith("sm_") ||
+      name.startsWith("sk_") ||
+      low.includes("/meshes/") ||
+      low.includes("/mesh/") ||
+      low.includes("/staticmeshes/") ||
+      low.includes("/skeletalmeshes/")
+    );
+  }
+
   function pathCard(path,source){
     const label=source==="json"?"JSON":"PATH";
     const title=source==="json"?"JSON reference":"Asset path";
+    const canPreview=Boolean(String(path||"").trim());
 
     return `
       <div class="tool-card">
@@ -670,12 +709,33 @@
         ${pathRow(label,path)}
 
         <div class="json-actions">
+          ${canPreview?`
+            <button
+              class="json-view-button mesh-image-view-button"
+              type="button"
+              data-image-path="${escapeAttr(path)}"
+            >${escapeHtml(t("viewImage","View Image"))}</button>
+          `:""}
+
           <button
             class="json-view-button"
             type="button"
             data-json-path="${escapeAttr(path)}"
-          >${escapeHtml(t("json","JSON"))}</button>
+          >${escapeHtml(t("viewJson","View JSON"))}</button>
         </div>
+
+        ${canPreview?`
+          <div class="mesh-image-panel" hidden>
+            <div class="mesh-image-panel-head">
+              <span>${escapeHtml(t("imageLabel","IMAGE"))}</span>
+            </div>
+            <div class="mesh-image-stage">
+              <div class="mesh-image-status"></div>
+              <img class="mesh-preview-image" alt="" decoding="async" hidden />
+            </div>
+            <div class="mesh-image-meta" hidden></div>
+          </div>
+        `:""}
 
         <div class="json-panel" hidden>
           <div class="json-panel-head">
@@ -991,6 +1051,593 @@
     if(Array.isArray(value))value.forEach((v,i)=>walkIdData(v,out,String(i)));
     else Object.entries(value).forEach(([k,v])=>walkIdData(v,out,k));
   }
+  /* ===== FNAA Epic Image Resolver =====
+     Resolution order:
+     1) confirmed local cache
+     2) requested path if it is already an image-like asset
+     3) direct Epic thumbnail/icon/preview reference from exported JSON
+     4) strict sibling image candidate from the local Fortnite path database
+     5) reverse lookup: related Gallery/Prefab/Playset/Creative asset whose JSON
+        actually references the requested asset, then use its Epic image
+     6) No Image found / Error 404
+
+     This intentionally does NOT render StaticMesh/SkeletalMesh geometry.
+  */
+  const IMAGE_RESOLVER_CACHE_KEY="fortniteAiAgent.imageResolver.v2";
+  const imageResolverJsonCache=new Map();
+  const imageResolverProbeCache=new Map();
+  const IMAGE_RELATED_LIMIT=32;
+  const IMAGE_RELATED_CONCURRENCY=4;
+
+  function normalizeAssetReference(value){
+    let text=String(value||"").trim();
+    if(!text)return "";
+
+    const quoted=text.match(/(?:Texture2D|Texture|Object|StaticMesh|SkeletalMesh|Blueprint)?'?((?:\/|FortniteGame\/)[^'\"]+)'?/i);
+    if(quoted?.[1])text=quoted[1];
+
+    text=text.replace(/^['\"]|['\"]$/g,"");
+    text=text.replace(/\.uasset$/i,"");
+
+    if(!/^(?:\/|FortniteGame\/)/i.test(text))return "";
+    return text;
+  }
+
+  function imageReferenceFromValue(value){
+    if(typeof value==="string")return normalizeAssetReference(value);
+    if(!value||typeof value!=="object")return "";
+
+    for(const key of [
+      "AssetPathName","ObjectPath","Path","ResourceObject","AssetPath",
+      "SoftObjectPath","ObjectPathName","PackageName"
+    ]){
+      const found=normalizeAssetReference(value[key]);
+      if(found)return found;
+    }
+
+    return "";
+  }
+
+  function imageRefsFromValue(value){
+    const out=[];
+    const seen=new Set();
+
+    const add=(v)=>{
+      const ref=normalizeAssetReference(v);
+      if(!ref)return;
+      const low=ref.toLowerCase();
+      if(seen.has(low))return;
+      seen.add(low);
+      out.push(ref);
+    };
+
+    if(typeof value==="string"){
+      add(value);
+      return out;
+    }
+
+    if(value&&typeof value==="object"){
+      for(const key of [
+        "AssetPathName","ObjectPath","Path","ResourceObject","AssetPath",
+        "SoftObjectPath","ObjectPathName","PackageName"
+      ]){
+        if(typeof value[key]==="string")add(value[key]);
+      }
+    }
+
+    return out;
+  }
+
+  function imageAssetName(path){
+    return String(path||"").split("/").pop()||"";
+  }
+
+  function imageSemanticTokens(path){
+    let name=imageAssetName(path).toLowerCase().split(".")[0];
+    name=name.replace(/^(?:sm_|sk_|pid_|pb_|mi_|m_|bp_|t[-_]?icon[-_]?)/i,"");
+
+    const stop=new Set([
+      "athena","creative","prop","props","mesh","meshes","static","staticmesh",
+      "skeletalmesh","asset","game","content","cp","br","gallery","prefab",
+      "playset","device","icon","thumbnail","preview","image","01","02","03","04",
+      "05","06","07","08","09","a","b","c"
+    ]);
+
+    return [...new Set(
+      name.split(/[_\-.\s]+/)
+        .map(x=>x.trim())
+        .filter(x=>x.length>=3&&!stop.has(x)&&!/^\d+$/.test(x))
+    )].slice(0,7);
+  }
+
+  function imageTokenOverlap(a,b){
+    const aa=new Set(imageSemanticTokens(a));
+    const bb=new Set(imageSemanticTokens(b));
+    let count=0;
+    for(const token of aa)if(bb.has(token))count++;
+    return count;
+  }
+
+  function isImageLikeAssetPath(path){
+    const low=imageAssetName(path).toLowerCase();
+    return /(?:t[-_]?icon|thumbnail|preview|display.?image|gallery.?art|prefab.?icon|featured.?image|ui[-_]?icon|portrait|keyart)/i.test(low);
+  }
+
+  function isLikelySurfaceTexture(path){
+    const low=imageAssetName(path).toLowerCase();
+    if(/(?:icon|thumbnail|preview|display|gallery|prefab|portrait|keyart)/i.test(low))return false;
+
+    return /(?:^|[_-])(?:n|normal|d|diff|diffuse|albedo|basecolor|s|spec|specular|r|rough|roughness|m|metal|metallic|orm|mra|mask|opacity|ao)(?:$|[_-])/i.test(low);
+  }
+
+  function rankImageCandidates(data,contextPath=""){
+    const found=new Map();
+    const keyPattern=/(?:displayassetpath|displayasset|galleryart|galleryimage|prefabicon|largeicon|smallicon|icon|previewimage|smallpreviewimage|largepreviewimage|thumbnailimage|thumbnailtexture|previewtexture|displayimage|featuredimage|portrait|keyart|image|brush)/i;
+    const namePattern=/(?:t[-_]?icon|thumbnail|preview|display.?image|gallery.?art|prefab.?icon|featured.?image|ui[-_]?icon|portrait|keyart)/i;
+
+    const add=(value,key="",bonus=0)=>{
+      for(const ref of imageRefsFromValue(value)){
+        if(isLikelySurfaceTexture(ref))continue;
+        let score=bonus;
+        if(keyPattern.test(key))score+=120;
+        if(namePattern.test(ref))score+=150;
+        if(/Texture2D/i.test(String(value)))score+=25;
+        score+=imageTokenOverlap(ref,contextPath)*18;
+
+        const low=ref.toLowerCase();
+        const old=found.get(low);
+        if(!old||old.score<score)found.set(low,{ref,score});
+      }
+    };
+
+    const scan=(node,parentKey="")=>{
+      if(node==null)return;
+
+      if(typeof node==="string"){
+        if(keyPattern.test(parentKey)||namePattern.test(node)){
+          add(node,parentKey,keyPattern.test(parentKey)?80:0);
+        }
+        return;
+      }
+
+      if(Array.isArray(node)){
+        node.forEach(x=>scan(x,parentKey));
+        return;
+      }
+
+      if(typeof node==="object"){
+        for(const [key,value] of Object.entries(node)){
+          if(keyPattern.test(key))add(value,key,100);
+          scan(value,key);
+        }
+      }
+    };
+
+    scan(data);
+    return [...found.values()]
+      .sort((a,b)=>b.score-a.score)
+      .map(x=>x.ref)
+      .slice(0,18);
+  }
+
+  // Keep the old function name because older FNAA code may still call it.
+  function explicitPreviewCandidates(data){
+    return rankImageCandidates(data,"");
+  }
+
+  function previewImageUrls(assetRef){
+    const ref=normalizeAssetReference(assetRef);
+    if(!ref)return [];
+
+    const clean=ref.includes(".")?ref.split(".")[0]:ref;
+    const urls=[`${EXPORT_BASE}?path=${encodeURIComponent(clean)}&raw=false`];
+
+    const fsPath=toFilePath(clean);
+    if(fsPath&&fsPath!==clean){
+      urls.push(`${EXPORT_BASE}?path=${encodeURIComponent(fsPath)}&raw=false`);
+    }
+
+    return [...new Set(urls)];
+  }
+
+  function loadImageUrl(img,url,timeoutMs=12000){
+    return new Promise((resolve)=>{
+      let done=false;
+      const finish=(ok)=>{
+        if(done)return;
+        done=true;
+        clearTimeout(timer);
+        img.onload=null;
+        img.onerror=null;
+        resolve(ok);
+      };
+
+      const timer=setTimeout(()=>finish(false),timeoutMs);
+      img.onload=()=>finish(img.naturalWidth>0&&img.naturalHeight>0);
+      img.onerror=()=>finish(false);
+      img.src=url;
+    });
+  }
+
+  function probeImageUrl(url,timeoutMs=10000){
+    if(imageResolverProbeCache.has(url))return imageResolverProbeCache.get(url);
+
+    const request=new Promise((resolve)=>{
+      const probe=new Image();
+      let done=false;
+
+      const finish=(ok)=>{
+        if(done)return;
+        done=true;
+        clearTimeout(timer);
+        probe.onload=null;
+        probe.onerror=null;
+        resolve(ok);
+      };
+
+      const timer=setTimeout(()=>finish(false),timeoutMs);
+      probe.onload=()=>finish(probe.naturalWidth>0&&probe.naturalHeight>0);
+      probe.onerror=()=>finish(false);
+      probe.src=url;
+    });
+
+    imageResolverProbeCache.set(url,request);
+    request.then(ok=>{if(!ok)imageResolverProbeCache.delete(url);});
+    return request;
+  }
+
+  async function firstWorkingPreviewUrl(assetRef){
+    for(const url of previewImageUrls(assetRef)){
+      if(await probeImageUrl(url))return url;
+    }
+    return "";
+  }
+
+  function readImageResolverCache(){
+    try{
+      const value=JSON.parse(localStorage.getItem(IMAGE_RESOLVER_CACHE_KEY)||"{}");
+      return value&&typeof value==="object"?value:{};
+    }catch{
+      return {};
+    }
+  }
+
+  function rememberImageResolution(path,result){
+    if(!path||!result?.url)return;
+
+    try{
+      const cache=readImageResolverCache();
+      cache[String(path).toLowerCase()]={
+        url:result.url,
+        assetRef:result.assetRef||"",
+        source:result.source||"Epic image",
+        savedAt:Date.now()
+      };
+
+      const trimmed=Object.fromEntries(
+        Object.entries(cache)
+          .sort((a,b)=>(b[1]?.savedAt||0)-(a[1]?.savedAt||0))
+          .slice(0,300)
+      );
+
+      localStorage.setItem(IMAGE_RESOLVER_CACHE_KEY,JSON.stringify(trimmed));
+    }catch{}
+  }
+
+  async function cachedImageResolution(path){
+    const item=readImageResolverCache()[String(path||"").toLowerCase()];
+    if(!item?.url)return null;
+    if(!await probeImageUrl(item.url))return null;
+    return item;
+  }
+
+  async function imageResolverExportJson(path){
+    const key=String(path||"").trim();
+    if(!key)return null;
+    if(imageResolverJsonCache.has(key))return imageResolverJsonCache.get(key);
+
+    const request=exportJson(key);
+    imageResolverJsonCache.set(key,request);
+
+    try{
+      return await request;
+    }catch(error){
+      imageResolverJsonCache.delete(key);
+      throw error;
+    }
+  }
+
+  function isCreativeImageContainerPath(path){
+    const low=String(path||"").toLowerCase();
+    return /(?:playset|prefab|galler|gallery|creative|pid_|pb_|device|plot)/i.test(low);
+  }
+
+  function targetImageNeedles(path){
+    const ref=(normalizeAssetReference(path)||String(path||"")).toLowerCase();
+    const clean=ref.split(".")[0];
+    const base=imageAssetName(clean).toLowerCase();
+    const noPrefix=base.replace(/^(?:sm_|sk_|pid_|pb_|mi_|m_|bp_)/i,"");
+
+    return [...new Set([clean,base,noPrefix].filter(x=>x&&x.length>=5))];
+  }
+
+  function exportedJsonReferencesTarget(data,targetPath){
+    if(!data)return false;
+    let text="";
+    try{text=JSON.stringify(data).toLowerCase();}catch{return false;}
+    return targetImageNeedles(targetPath).some(needle=>text.includes(needle));
+  }
+
+  async function collectImageRelatedSearchResults(targetPath){
+    if(!window.FortniteAgent?.searchDatabase)return [];
+
+    const tokens=imageSemanticTokens(targetPath);
+    const base=imageAssetName(targetPath)
+      .replace(/\.(?:uasset|uexp|ubulk)$/i,"")
+      .replace(/^(?:sm_|sk_|pid_|pb_|mi_|m_|bp_)/i,"");
+
+    const queries=[base,tokens.join(" ")];
+    for(const token of tokens.slice(0,4)){
+      queries.push(`${token} gallery`,`${token} prefab`,`${token} playset`);
+    }
+
+    const uniqueQueries=[...new Set(queries.map(x=>String(x||"").trim()).filter(x=>x.length>=3))].slice(0,10);
+    const responses=await Promise.all(uniqueQueries.map(async query=>{
+      try{return await window.FortniteAgent.searchDatabase("all",query);}
+      catch{return null;}
+    }));
+
+    const map=new Map();
+    for(const response of responses){
+      const list=response?.allResults||response?.results||[];
+      for(const item of list){
+        const path=String(item?.path||"").trim();
+        if(!path)continue;
+        const low=path.toLowerCase();
+        if(low===String(targetPath||"").toLowerCase())continue;
+
+        let score=imageTokenOverlap(path,targetPath)*80;
+        if(isCreativeImageContainerPath(path))score+=260;
+        if(isImageLikeAssetPath(path))score+=180;
+        if(/(?:playset|prefab|galler|gallery|pid_|pb_)/i.test(low))score+=120;
+
+        const old=map.get(low);
+        if(!old||old.score<score)map.set(low,{path,score});
+      }
+    }
+
+    return [...map.values()]
+      .sort((a,b)=>b.score-a.score||a.path.length-b.path.length)
+      .slice(0,100);
+  }
+
+  async function resolveStrictSiblingImage(targetPath,related){
+    const targetTokens=imageSemanticTokens(targetPath);
+    if(!targetTokens.length)return null;
+
+    const targetDir=String(targetPath||"").split(".")[0].toLowerCase().split("/").slice(0,-1).join("/");
+
+    for(const item of related){
+      if(!isImageLikeAssetPath(item.path))continue;
+
+      const overlap=imageTokenOverlap(item.path,targetPath);
+      const candidateDir=String(item.path||"").split(".")[0].toLowerCase().split("/").slice(0,-1).join("/");
+      const sameDir=targetDir&&candidateDir===targetDir;
+
+      // One-token names are too ambiguous unless the image is in the same folder.
+      if(targetTokens.length===1){
+        if(!(sameDir&&overlap>=1))continue;
+      }else if(overlap<2){
+        continue;
+      }
+
+      const url=await firstWorkingPreviewUrl(item.path);
+      if(url){
+        return {
+          url,
+          assetRef:item.path,
+          source:"Epic sibling image"
+        };
+      }
+    }
+
+    return null;
+  }
+
+  async function mapImageResolverLimit(items,limit,fn){
+    const out=new Array(items.length);
+    let next=0;
+
+    const worker=async()=>{
+      while(true){
+        const index=next++;
+        if(index>=items.length)return;
+        out[index]=await fn(items[index],index);
+      }
+    };
+
+    await Promise.all(
+      Array.from({length:Math.min(limit,items.length)},()=>worker())
+    );
+
+    return out;
+  }
+
+  async function resolveRelatedCreativeImage(targetPath,related){
+    const candidates=related
+      .filter(item=>isCreativeImageContainerPath(item.path)&&!isImageLikeAssetPath(item.path))
+      .slice(0,IMAGE_RELATED_LIMIT);
+
+    const checked=await mapImageResolverLimit(
+      candidates,
+      IMAGE_RELATED_CONCURRENCY,
+      async item=>{
+        try{
+          const data=await imageResolverExportJson(item.path);
+          if(!exportedJsonReferencesTarget(data,targetPath))return null;
+
+          for(const ref of rankImageCandidates(data,item.path)){
+            const url=await firstWorkingPreviewUrl(ref);
+            if(url){
+              return {
+                url,
+                assetRef:ref,
+                source:`Related Epic image via ${imageAssetName(item.path)}`
+              };
+            }
+          }
+        }catch{}
+        return null;
+      }
+    );
+
+    return checked.find(Boolean)||null;
+  }
+
+  async function resolveFortniteImage(path){
+    const requested=normalizeAssetReference(path)||String(path||"").trim();
+    if(!requested)return null;
+
+    // 1. Confirmed browser cache.
+    const cached=await cachedImageResolution(requested);
+    if(cached)return cached;
+
+    // 2. The requested asset is itself an Epic image-like Texture2D path.
+    if(isImageLikeAssetPath(requested)){
+      const url=await firstWorkingPreviewUrl(requested);
+      if(url){
+        const result={url,assetRef:requested,source:"Direct Epic image"};
+        rememberImageResolution(requested,result);
+        return result;
+      }
+    }
+
+    // 3. Direct exported JSON references.
+    try{
+      const data=await imageResolverExportJson(requested);
+      for(const ref of rankImageCandidates(data,requested)){
+        const url=await firstWorkingPreviewUrl(ref);
+        if(url){
+          const result={url,assetRef:ref,source:"Epic thumbnail/icon"};
+          rememberImageResolution(requested,result);
+          return result;
+        }
+      }
+    }catch{}
+
+    // 4/5. Local DB name discovery, then strict checks to avoid random images.
+    const related=await collectImageRelatedSearchResults(requested);
+
+    const sibling=await resolveStrictSiblingImage(requested,related);
+    if(sibling){
+      rememberImageResolution(requested,sibling);
+      return sibling;
+    }
+
+    const creative=await resolveRelatedCreativeImage(requested,related);
+    if(creative){
+      rememberImageResolution(requested,creative);
+      return creative;
+    }
+
+    return null;
+  }
+
+  function closeMeshImagePanel(card){
+    const panel=card?.querySelector(".mesh-image-panel");
+    const button=card?.querySelector("[data-image-path]");
+    if(!panel||panel.hidden)return;
+
+    panel.hidden=true;
+    if(button)button.textContent=t("viewImage","View Image");
+  }
+
+  function closeJsonPanel(card){
+    const panel=card?.querySelector(".json-panel");
+    const button=card?.querySelector("[data-json-path]");
+    if(!panel||panel.hidden)return;
+
+    panel.hidden=true;
+    if(button)button.textContent=t("viewJson","View JSON");
+  }
+
+  function bindMeshImageButtons(root){
+    root.querySelectorAll("[data-image-path]").forEach((button)=>{
+      if(button.dataset.imageBound)return;
+      button.dataset.imageBound="1";
+
+      button.addEventListener("click",async()=>{
+        const card=button.closest(".tool-card");
+        const panel=card?.querySelector(".mesh-image-panel");
+        const status=panel?.querySelector(".mesh-image-status");
+        const meta=panel?.querySelector(".mesh-image-meta");
+        const img=panel?.querySelector(".mesh-preview-image");
+
+        if(!card||!panel||!status||!img)return;
+
+        if(!panel.hidden){
+          closeMeshImagePanel(card);
+          return;
+        }
+
+        closeJsonPanel(card);
+        panel.hidden=false;
+        button.textContent=t("hideImage","Hide Image");
+
+        if(button.dataset.imageState==="ready"&&img.src){
+          status.hidden=true;
+          if(meta)meta.hidden=false;
+          img.hidden=false;
+          return;
+        }
+
+        button.disabled=true;
+        img.hidden=true;
+        status.hidden=false;
+        if(meta){meta.hidden=true;meta.textContent="";}
+        status.textContent=t("loadingImage","Searching Epic images...");
+
+        try{
+          const result=await resolveFortniteImage(button.dataset.imagePath);
+
+          if(!result?.url){
+            button.dataset.imageState="missing";
+            img.removeAttribute("src");
+            img.hidden=true;
+            status.hidden=false;
+            status.textContent=t("imageUnavailable","No Image found\nError 404");
+            return;
+          }
+
+          if(!await loadImageUrl(img,result.url)){
+            throw new Error("Resolved image could not be loaded.");
+          }
+
+          button.dataset.imageState="ready";
+          status.hidden=true;
+          img.hidden=false;
+
+          if(meta){
+            meta.textContent=result.source||"Epic image";
+            meta.hidden=false;
+          }
+        }catch(error){
+          // Temporary failures are intentionally NOT cached as 404.
+          button.dataset.imageState="";
+          img.removeAttribute("src");
+          img.hidden=true;
+          status.hidden=false;
+          status.textContent=t("imageError","Preview temporarily unavailable.");
+          if(meta){meta.hidden=true;meta.textContent="";}
+          console.warn("FNAA Image Resolver:",error);
+        }finally{
+          button.disabled=false;
+          if(!panel.hidden)button.textContent=t("hideImage","Hide Image");
+        }
+      });
+    });
+  }
+
   function bindJsonButtons(root){
     root.querySelectorAll("[data-json-path]").forEach((button)=>{
       if(button.dataset.jsonBound)return;
@@ -1006,9 +1653,11 @@
 
         if(!panel.hidden){
           panel.hidden=true;
-          button.textContent=t("json","JSON");
+          button.textContent=t("viewJson","View JSON");
           return;
         }
+
+        closeMeshImagePanel(card);
 
         if(button.dataset.loaded==="1"){
           panel.hidden=false;
@@ -1034,7 +1683,7 @@
         }catch(error){
           code.textContent=error?.message||t("jsonUnavailable","JSON is unavailable for this path.");
           panel.hidden=false;
-          button.textContent=t("json","JSON");
+          button.textContent=t("viewJson","View JSON");
         }finally{
           button.disabled=false;
         }
