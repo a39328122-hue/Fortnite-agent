@@ -1,11 +1,9 @@
-
 window.FORTNITE_FIREBASE_CONFIG = {
-  apiKey: "PASTE_FIREBASE_API_KEY",
-  authDomain: "PASTE_PROJECT_ID.firebaseapp.com",
-  projectId: "PASTE_PROJECT_ID",
-  appId: "PASTE_FIREBASE_APP_ID"
+  apiKey: "AIzaSyB_s5-nhRQLktpXO3iilFmrT-C0AliNybU",
+  authDomain: "fortnite-ai-agent.firebaseapp.com",
+  projectId: "fortnite-ai-agent",
+  appId: "1:37283758396:web:6300549647897beeb49e39"
 };
-
 
 window.FORTNITE_AUTH_READY = new Promise((resolve) => {
   window.__resolveFortniteAuthReady = resolve;
