@@ -2,6 +2,10 @@ const CHAT_MODEL = "openai/gpt-oss-120b";
 const FAST_RESEARCH_MODEL = "groq/compound-mini";
 const DEEP_RESEARCH_MODEL = "groq/compound";
 
+const RATE_BUCKETS = new Map();
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX_PER_WINDOW = 20;
+
 const SYSTEM_PROMPT = `
 You are Fortnite Ai Agent, developed by YT @27lf.
 
@@ -69,21 +73,45 @@ function getAllowedOrigins(env) {
   return set;
 }
 
+function isAllowedOrigin(request, env) {
+  const origin = request.headers.get("Origin") || "";
+  return !!origin && getAllowedOrigins(env).has(origin);
+}
+
 function corsHeaders(request, env) {
   const origin = request.headers.get("Origin") || "";
   const allowed = getAllowedOrigins(env);
-  const chosen = allowed.has(origin) ? origin : "https://a39328122-hue.github.io";
-
-  return {
-    "Access-Control-Allow-Origin": chosen,
+  const headers = {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, X-FNAA-Client",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
     "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer"
   };
+  if (allowed.has(origin)) headers["Access-Control-Allow-Origin"] = origin;
+  return headers;
+}
+
+function allowBySoftRateLimit(request) {
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const now = Date.now();
+  const bucket = RATE_BUCKETS.get(ip);
+
+  if (!bucket || now - bucket.startedAt >= RATE_WINDOW_MS) {
+    RATE_BUCKETS.set(ip, { startedAt: now, count: 1 });
+    return true;
+  }
+
+  bucket.count += 1;
+  if (RATE_BUCKETS.size > 4000) {
+    for (const [key, value] of RATE_BUCKETS) {
+      if (now - value.startedAt >= RATE_WINDOW_MS) RATE_BUCKETS.delete(key);
+    }
+  }
+  return bucket.count <= RATE_MAX_PER_WINDOW;
 }
 
 function json(request, env, body, status = 200, extra = {}) {
@@ -173,11 +201,29 @@ async function callChat(apiKey, messages, researchMode) {
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") {
+      if (!isAllowedOrigin(request, env)) return new Response(null, { status: 403 });
       return new Response(null, { status: 204, headers: corsHeaders(request, env) });
     }
 
     if (request.method !== "POST") {
       return json(request, env, { error: "Use POST." }, 405);
+    }
+
+    if (!isAllowedOrigin(request, env)) {
+      return json(request, env, { error: "Origin not allowed." }, 403);
+    }
+
+    if (request.headers.get("X-FNAA-Client") !== "web-v1") {
+      return json(request, env, { error: "Invalid client." }, 403);
+    }
+
+    const contentType = request.headers.get("Content-Type") || "";
+    if (!contentType.toLowerCase().includes("application/json")) {
+      return json(request, env, { error: "Content-Type must be application/json." }, 415);
+    }
+
+    if (!allowBySoftRateLimit(request)) {
+      return json(request, env, { error: "Too many requests. Try again in a minute." }, 429, { "Retry-After": "60" });
     }
 
     const length = Number(request.headers.get("Content-Length") || "0");
@@ -192,14 +238,7 @@ export default {
       return json(request, env, { error: "Invalid request." }, 400);
     }
 
-    const userApiKey =
-      typeof body?.apiKey === "string" &&
-      body.apiKey.trim().startsWith("gsk_") &&
-      body.apiKey.trim().length < 300
-        ? body.apiKey.trim()
-        : null;
-
-    const apiKey = userApiKey || env.GROQ_API_KEY;
+    const apiKey = env.GROQ_API_KEY;
 
     if (!apiKey) {
       return json(request, env, { error: "AI backend is not configured." }, 500);
@@ -233,8 +272,8 @@ export default {
           return json(
             request,
             env,
-            { error: userApiKey ? "Your Groq API key is invalid or was revoked." : "AI backend authentication failed." },
-            userApiKey ? 401 : 502
+            { error: "AI backend authentication failed." },
+            502
           );
         }
 
