@@ -2,6 +2,7 @@ const CHAT_MODEL = "openai/gpt-oss-120b";
 const FAST_RESEARCH_MODEL = "groq/compound-mini";
 const DEEP_RESEARCH_MODEL = "groq/compound";
 const DILLY_EXPORT_BASE = "https://export-service-new.dillyapis.com/v1/export";
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 const RATE_BUCKETS = new Map();
 const RATE_WINDOW_MS = 60_000;
@@ -199,100 +200,465 @@ async function callChat(apiKey, messages, researchMode) {
   });
 }
 
-async function handleImageRequest(request, env, url) {
-  const path = String(url.searchParams.get("path") || "").trim();
 
-  if (!path || path.length > 2400 || /^https?:\/\//i.test(path)) {
-    return new Response("Invalid asset path.", {
-      status: 400,
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-store",
-        "X-Content-Type-Options": "nosniff"
-      }
-    });
+function imageCorsHeaders(request, env, contentType="application/json; charset=utf-8", publicImage=false) {
+  const origin = request.headers.get("Origin") || "";
+  const allowed = getAllowedOrigins(env);
+  const headers = {
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Max-Age": "86400",
+    "Content-Type": contentType,
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cross-Origin-Resource-Policy": "cross-origin"
+  };
+
+  if (publicImage) {
+    headers["Access-Control-Allow-Origin"] = "*";
+  } else {
+    headers["Vary"] = "Origin";
+    if (allowed.has(origin)) headers["Access-Control-Allow-Origin"] = origin;
   }
 
+  return headers;
+}
+
+function cleanAssetInput(value) {
+  let text = String(value || "").trim().replace(/\\/g, "/");
+  if (!text || /^https?:\/\//i.test(text)) return "";
+  if (/[\u0000-\u001f\u007f]/.test(text) || text.includes("..")) return "";
+
+  const wrapped = text.match(/^(?:Texture2D|Texture|Object|StaticMesh|SkeletalMesh|Blueprint|MaterialInstanceConstant|Material)?'?(.+?)'?$/i);
+  if (wrapped?.[1]) text = wrapped[1];
+
+  text = text.replace(/^["']|["']$/g, "");
+
+  if (!/\.(?:uasset|uexp|ubulk)$/i.test(text)) {
+    const slash = text.lastIndexOf("/");
+    const dot = text.lastIndexOf(".");
+    if (dot > slash) {
+      const left = text.slice(0, dot);
+      const objectName = text.slice(dot + 1).replace(/_C$/i, "");
+      const assetName = left.slice(left.lastIndexOf("/") + 1);
+      if (objectName.toLowerCase() === assetName.toLowerCase()) text = left;
+    }
+  }
+
+  return text;
+}
+
+function assetName(path) {
+  return String(path || "").replace(/\.(?:uasset|uexp|ubulk)$/i, "").split("/").pop() || "";
+}
+
+function addUnique(list, seen, value) {
+  const v = String(value || "").trim().replace(/\\/g, "/");
+  if (!v || v.length > 2400) return;
+  const key = v.toLowerCase();
+  if (seen.has(key)) return;
+  seen.add(key);
+  list.push(v);
+}
+
+function dillyPathCandidates(rawValue) {
+  const raw = cleanAssetInput(rawValue);
+  if (!raw) return [];
+
+  const out = [];
+  const seen = new Set();
+  const clean = raw.replace(/\.(?:uasset|uexp|ubulk)$/i, "");
+
+  const pushForms = (base) => {
+    addUnique(out, seen, base);
+    if (/\.uasset$/i.test(base)) addUnique(out, seen, base.replace(/\.uasset$/i, ""));
+    else if (!/\.(?:uexp|ubulk)$/i.test(base)) addUnique(out, seen, `${base}.uasset`);
+  };
+
+  const pushObjectForms = (objBase) => {
+    addUnique(out, seen, objBase);
+    const name = assetName(objBase);
+    if (name) addUnique(out, seen, `${objBase}.${name}`);
+  };
+
+  // Exact user input first.
+  addUnique(out, seen, raw);
+
+  if (/^\/Game\//i.test(clean)) {
+    pushObjectForms(clean);
+    pushForms(`FortniteGame/Content/${clean.slice(6)}`);
+  } else if (/^FortniteGame\/Content\//i.test(clean)) {
+    pushForms(clean);
+    const obj = `/Game/${clean.slice("FortniteGame/Content/".length)}`;
+    pushObjectForms(obj);
+  } else {
+    const fsPlugin = clean.match(/^FortniteGame\/Plugins\/GameFeatures\/([^/]+)\/Content\/(.+)$/i)
+      || clean.match(/^(?:FortniteGame\/)?Plugins\/(?:GameFeatures\/)?([^/]+)\/Content\/(.+)$/i);
+
+    if (fsPlugin) {
+      const canonicalFs = `FortniteGame/Plugins/GameFeatures/${fsPlugin[1]}/Content/${fsPlugin[2]}`;
+      pushForms(canonicalFs);
+      pushObjectForms(`/${fsPlugin[1]}/${fsPlugin[2]}`);
+    } else {
+      const objPlugin = clean.match(/^\/([^/]+)\/(.+)$/);
+      if (objPlugin && objPlugin[1].toLowerCase() !== "game") {
+        pushObjectForms(clean);
+        pushForms(`FortniteGame/Plugins/GameFeatures/${objPlugin[1]}/Content/${objPlugin[2]}`);
+      } else {
+        pushForms(clean);
+      }
+    }
+  }
+
+  return out.slice(0, 8);
+}
+
+function isLikelySurfaceTexture(path) {
+  const name = assetName(path).toLowerCase();
+  if (/(?:icon|thumbnail|preview|display|gallery|prefab|portrait|keyart)/i.test(name)) return false;
+
+  return /(?:^|[_-])(?:n|normal|d|diff|diffuse|albedo|basecolor|s|spec|specular|r|rough|roughness|m|metal|metallic|orm|mra|mask|opacity|ao|emissive|height)(?:$|[_-])/i.test(name)
+    || /(?:lightmap|noise|detail|gradient|lut|lookup|mask|normal|roughness|specular|basecolor)/i.test(name);
+}
+
+function normalizeRefString(value) {
+  if (typeof value !== "string") return "";
+  let text = value.trim();
+  if (!text) return "";
+
+  const wrapped = text.match(/(?:Texture2D|Texture|Object|StaticMesh|SkeletalMesh|Blueprint|MaterialInstanceConstant|Material)?'?((?:\/|FortniteGame\/)[^'"]+)'?/i);
+  if (wrapped?.[1]) text = wrapped[1];
+
+  text = text.replace(/^["']|["']$/g, "");
+  if (!/^(?:\/|FortniteGame\/)/i.test(text)) return "";
+  return cleanAssetInput(text);
+}
+
+function extractImageCandidates(data, contextPath="") {
+  const found = new Map();
+
+  const keyPattern = /(?:displayassetpath|displayasset|galleryart|galleryimage|prefabicon|largeicon|smallicon|icon|previewimage|smallpreviewimage|largepreviewimage|thumbnailimage|thumbnailtexture|previewtexture|displayimage|featuredimage|portrait|keyart|image|brush)/i;
+  const namePattern = /(?:t[-_]?icon|thumbnail|preview|display.?image|gallery.?art|prefab.?icon|featured.?image|ui[-_]?icon|portrait|keyart)/i;
+
+  const add = (value, key="", bonus=0) => {
+    const refs = [];
+
+    if (typeof value === "string") refs.push(value);
+    else if (value && typeof value === "object") {
+      for (const k of ["AssetPathName","ObjectPath","Path","ResourceObject","AssetPath","SoftObjectPath","ObjectPathName","PackageName"]) {
+        if (typeof value[k] === "string") refs.push(value[k]);
+      }
+    }
+
+    for (const raw of refs) {
+      const ref = normalizeRefString(raw);
+      if (!ref || isLikelySurfaceTexture(ref)) continue;
+
+      let score = bonus;
+      if (keyPattern.test(key)) score += 120;
+      if (namePattern.test(ref)) score += 150;
+      if (/Texture2D/i.test(String(raw))) score += 25;
+
+      const low = ref.toLowerCase();
+      const old = found.get(low);
+      if (!old || old.score < score) found.set(low, { ref, score });
+    }
+  };
+
+  const scan = (node, parentKey="") => {
+    if (node == null) return;
+
+    if (typeof node === "string") {
+      if (keyPattern.test(parentKey) || namePattern.test(node)) add(node, parentKey, keyPattern.test(parentKey) ? 80 : 0);
+      return;
+    }
+
+    if (Array.isArray(node)) {
+      for (const item of node) scan(item, parentKey);
+      return;
+    }
+
+    if (typeof node === "object") {
+      for (const [key, value] of Object.entries(node)) {
+        if (keyPattern.test(key)) add(value, key, 100);
+        scan(value, key);
+      }
+    }
+  };
+
+  scan(data);
+
+  return [...found.values()]
+    .sort((a,b) => b.score - a.score)
+    .map(x => x.ref)
+    .filter(ref => ref.toLowerCase() !== String(contextPath || "").toLowerCase())
+    .slice(0, 8);
+}
+
+async function fetchWithTimeout(url, options={}, timeoutMs=6500) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchDillyImage(path) {
   const upstream = new URL(DILLY_EXPORT_BASE);
-  // Dilly docs use Path + ForceImage.
   upstream.searchParams.set("Path", path);
   upstream.searchParams.set("ForceImage", "true");
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
+  return fetchWithTimeout(upstream.toString(), {
+    method: "GET",
+    headers: {
+      "Accept": "image/png,image/webp,image/*;q=0.9,application/json;q=0.3,*/*;q=0.1"
+    }
+  }, 7000);
+}
 
-  try {
-    const response = await fetch(upstream.toString(), {
-      method: "GET",
-      headers: {
-        "Accept": "image/png,image/webp,image/*;q=0.9,*/*;q=0.1"
-      },
-      signal: controller.signal,
-      cf: {
-        cacheEverything: false
-      }
-    });
+async function fetchDillyJson(path) {
+  const attempts = [
+    { pathKey: "Path", rawKey: "Raw" },
+    { pathKey: "path", rawKey: "raw" }
+  ];
+
+  for (const variant of attempts) {
+    const upstream = new URL(DILLY_EXPORT_BASE);
+    upstream.searchParams.set(variant.pathKey, path);
+    upstream.searchParams.set(variant.rawKey, "false");
+
+    let response;
+    try {
+      response = await fetchWithTimeout(upstream.toString(), {
+        method: "GET",
+        headers: { "Accept": "application/json,text/plain;q=0.9,*/*;q=0.1" }
+      }, 6500);
+    } catch (error) {
+      if (error?.name === "AbortError") continue;
+      continue;
+    }
 
     if (!response.ok) {
-      const status = response.status === 404 ? 404 : 502;
-      return new Response(
-        status === 404 ? "Image Not found error #404" : "Image upstream unavailable.",
-        {
-          status,
-          headers: {
-            "Content-Type": "text/plain; charset=utf-8",
-            "Cache-Control": status === 404 ? "public, max-age=30" : "no-store",
-            "X-Content-Type-Options": "nosniff"
-          }
-        }
-      );
+      try { await response.body?.cancel(); } catch {}
+      continue;
     }
 
     const type = String(response.headers.get("content-type") || "").toLowerCase();
-    if (!type.startsWith("image/")) {
+
+    try {
+      if (type.includes("application/json")) return await response.json();
+      const text = await response.text();
+      if (!text || text.length > 8_000_000) continue;
+      return JSON.parse(text);
+    } catch {}
+  }
+
+  return null;
+}
+
+async function tryImageCandidates(rawCandidates, attemptsLog=[]) {
+  for (const raw of rawCandidates) {
+    const variants = dillyPathCandidates(raw);
+
+    for (const candidate of variants) {
+      let response;
+      try {
+        response = await fetchDillyImage(candidate);
+      } catch (error) {
+        attemptsLog.push({ path: candidate, status: 0, contentType: "", error: error?.name || "fetch" });
+        continue;
+      }
+
+      const type = String(response.headers.get("content-type") || "").toLowerCase();
+      attemptsLog.push({ path: candidate, status: response.status, contentType: type.split(";")[0] || "" });
+
+      if (response.ok && type.startsWith("image/")) {
+        const length = Number(response.headers.get("content-length") || "0");
+        if (length > MAX_IMAGE_BYTES) {
+          try { await response.body?.cancel(); } catch {}
+          return { state: "error", status: 413, error: "Image is too large for mobile preview.", attempts: attemptsLog };
+        }
+
+        return { state: "ready", status: 200, path: candidate, contentType: type, response, attempts: attemptsLog };
+      }
+
+      // 200 non-image is NOT a real 404. Keep looking and preserve diagnostics.
+      try { await response.body?.cancel(); } catch {}
+    }
+  }
+
+  return null;
+}
+
+async function resolveDillyImage(rawPath, statusOnly=false) {
+  const clean = cleanAssetInput(rawPath);
+  if (!clean) return { state: "invalid", status: 400, error: "Invalid asset path.", attempts: [] };
+
+  const attempts = [];
+
+  // Stage 1: ask Dilly for an image of the requested asset using normalized path variants.
+  let direct = await tryImageCandidates([clean], attempts);
+  if (direct?.state === "ready") {
+    if (statusOnly) {
+      try { await direct.response.body?.cancel(); } catch {}
+      return { ...direct, response: undefined };
+    }
+    return direct;
+  }
+  if (direct?.state === "error") return direct;
+
+  // Stage 2: export JSON for the requested asset and look ONLY for explicit UI/thumbnail/preview image refs.
+  // This is forward-reference resolution, not a guessy material-texture fallback.
+  const requestVariants = dillyPathCandidates(clean).slice(0, 3);
+  let jsonData = null;
+
+  for (const candidate of requestVariants) {
+    jsonData = await fetchDillyJson(candidate);
+    if (jsonData) break;
+  }
+
+  if (jsonData) {
+    const refs = extractImageCandidates(jsonData, clean);
+    if (refs.length) {
+      const viaJson = await tryImageCandidates(refs, attempts);
+      if (viaJson?.state === "ready") {
+        if (statusOnly) {
+          try { await viaJson.response.body?.cancel(); } catch {}
+          return {
+            ...viaJson,
+            response: undefined,
+            source: "json-image-reference",
+            resolvedAsset: refs.find(r => dillyPathCandidates(r).some(v => v === viaJson.path)) || ""
+          };
+        }
+        return { ...viaJson, source: "json-image-reference" };
+      }
+      if (viaJson?.state === "error") return viaJson;
+    }
+  }
+
+  // Do not lie: a clean miss after all supported stages is a real resolver miss.
+  return { state: "missing", status: 404, attempts };
+}
+
+function limitReadableStream(body, maxBytes) {
+  if (!body) return body;
+  const reader = body.getReader();
+  let total = 0;
+
+  return new ReadableStream({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          controller.close();
+          return;
+        }
+        total += value.byteLength;
+        if (total > maxBytes) {
+          try { await reader.cancel("image-too-large"); } catch {}
+          controller.error(new Error("Image stream exceeded mobile preview limit."));
+          return;
+        }
+        controller.enqueue(value);
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    }
+  });
+}
+
+async function handleImageRequest(request, env, url, statusOnly=false) {
+  const rawPath = String(url.searchParams.get("path") || "").trim();
+
+  if (!rawPath || rawPath.length > 2400) {
+    return new Response(JSON.stringify({ state: "invalid", error: "Invalid asset path." }), {
+      status: 400,
+      headers: imageCorsHeaders(request, env)
+    });
+  }
+
+  const origin = request.headers.get("Origin") || "";
+  if (statusOnly && origin && !getAllowedOrigins(env).has(origin)) {
+    return new Response(JSON.stringify({ state: "error", error: "Origin not allowed." }), {
+      status: 403,
+      headers: imageCorsHeaders(request, env)
+    });
+  }
+
+  try {
+    const result = await resolveDillyImage(rawPath, statusOnly);
+
+    if (statusOnly) {
+      const status = result.state === "ready" ? 200 : result.state === "missing" ? 404 : result.status || 502;
+      return new Response(JSON.stringify({
+        state: result.state,
+        status,
+        ...(result.path ? { resolvedPath: result.path } : {}),
+        ...(result.source ? { source: result.source } : {}),
+        ...(result.resolvedAsset ? { resolvedAsset: result.resolvedAsset } : {}),
+        ...(result.error ? { error: result.error } : {}),
+        attempts: (result.attempts || []).slice(0, 16)
+      }), {
+        status,
+        headers: { ...imageCorsHeaders(request, env), "Cache-Control": "no-store" }
+      });
+    }
+
+    if (result.state === "missing") {
       return new Response("Image Not found error #404", {
         status: 404,
         headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          "Cache-Control": "public, max-age=30",
-          "X-Content-Type-Options": "nosniff"
+          ...imageCorsHeaders(request, env, "text/plain; charset=utf-8", true),
+          "Cache-Control": "public, max-age=120"
         }
       });
     }
 
-    const headers = new Headers();
-    headers.set("Content-Type", type.split(";")[0]);
-    headers.set("Cache-Control", "public, max-age=86400, s-maxage=604800, immutable");
-    headers.set("Content-Disposition", "inline");
-    headers.set("X-Content-Type-Options", "nosniff");
-    headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+    if (result.state !== "ready" || !result.response) {
+      return new Response(JSON.stringify({ error: result.error || "Image service failed." }), {
+        status: result.status || 502,
+        headers: { ...imageCorsHeaders(request, env, "application/json; charset=utf-8", true), "Cache-Control": "no-store" }
+      });
+    }
 
-    const length = response.headers.get("content-length");
-    if (length) headers.set("Content-Length", length);
+    const upstream = result.response;
+    const length = Number(upstream.headers.get("content-length") || "0");
+    if (length > MAX_IMAGE_BYTES) {
+      try { await upstream.body?.cancel(); } catch {}
+      return new Response(JSON.stringify({ error: "Image is too large for mobile preview." }), {
+        status: 413,
+        headers: { ...imageCorsHeaders(request, env, "application/json; charset=utf-8", true), "Cache-Control": "no-store" }
+      });
+    }
 
-    // Stream the upstream body directly. Do NOT call arrayBuffer(), blob(), or text().
-    const output = new Response(response.body, {
-      status: 200,
-      headers
-    });
+    const headers = {
+      ...imageCorsHeaders(request, env, result.contentType || "image/png", true),
+      "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+      "Content-Disposition": "inline",
+      "X-FNAA-Image-Source": result.source || "direct-forceimage"
+    };
 
-    return output;
+    const upstreamLength = upstream.headers.get("content-length");
+    if (upstreamLength) headers["Content-Length"] = upstreamLength;
+
+    const etag = upstream.headers.get("etag");
+    if (etag) headers["ETag"] = etag;
+
+    const body = upstreamLength ? upstream.body : limitReadableStream(upstream.body, MAX_IMAGE_BYTES);
+    return new Response(body, { status: 200, headers });
   } catch (error) {
-    return new Response(
-      error?.name === "AbortError"
-        ? "Image request timed out."
-        : "Image upstream unavailable.",
-      {
-        status: 502,
-        headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          "Cache-Control": "no-store",
-          "X-Content-Type-Options": "nosniff"
-        }
-      }
-    );
-  } finally {
-    clearTimeout(timer);
+    const message = error?.name === "AbortError" ? "Image request timed out." : "Couldn't reach the image upstream.";
+    return new Response(JSON.stringify({ error: message }), {
+      status: 502,
+      headers: { ...imageCorsHeaders(request, env, "application/json; charset=utf-8", true), "Cache-Control": "no-store" }
+    });
   }
 }
 
@@ -301,12 +667,21 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
+      if (url.pathname === "/image" || url.pathname === "/image-status") {
+        const origin = request.headers.get("Origin") || "";
+        if (origin && !getAllowedOrigins(env).has(origin)) return new Response(null, { status: 403 });
+        return new Response(null, { status: 204, headers: imageCorsHeaders(request, env) });
+      }
       if (!isAllowedOrigin(request, env)) return new Response(null, { status: 403 });
       return new Response(null, { status: 204, headers: corsHeaders(request, env) });
     }
 
     if (request.method === "GET" && url.pathname === "/image") {
-      return handleImageRequest(request, env, url);
+      return handleImageRequest(request, env, url, false);
+    }
+
+    if (request.method === "GET" && url.pathname === "/image-status") {
+      return handleImageRequest(request, env, url, true);
     }
 
     if (request.method !== "POST") {
