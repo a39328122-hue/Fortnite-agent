@@ -781,3 +781,487 @@ html[dir="rtl"] .user-bubble{direction:rtl;text-align:right}
     font-weight:700;
   }
 }
+
+/* ===== Google account + polished settings ===== */
+.profile-settings{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  padding:8px 10px 18px;
+  text-align:center
+}
+.profile-avatar-button{
+  position:relative;
+  width:142px;
+  height:142px;
+  padding:0;
+  border:1px solid #2e2e2e;
+  border-radius:50%;
+  background:#101010;
+  overflow:hidden;
+  cursor:pointer
+}
+.profile-avatar{
+  width:100%;
+  height:100%;
+  display:block;
+  object-fit:cover;
+  object-position:center
+}
+.profile-avatar-edit{
+  position:absolute;
+  left:50%;
+  bottom:8px;
+  transform:translateX(-50%);
+  padding:5px 9px;
+  border:1px solid rgba(255,255,255,.18);
+  border-radius:999px;
+  background:rgba(0,0,0,.66);
+  color:#fff;
+  font-size:9px;
+  font-weight:800;
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px)
+}
+.profile-username{
+  margin-top:9px;
+  padding:4px 10px;
+  border:0;
+  border-radius:10px;
+  background:transparent;
+  color:#f4f4f4;
+  font-size:23px;
+  line-height:1.2;
+  font-weight:850;
+  letter-spacing:-.03em
+}
+.profile-account-type{margin-top:2px;color:#787878;font-size:10px;font-weight:700}
+.profile-locked .profile-avatar-edit{display:none}
+.profile-locked{cursor:pointer;opacity:.92}
+.settings-stack-card{align-items:flex-start}
+.theme-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:7px;
+  margin-top:12px
+}
+.theme-choice{
+  min-width:0;
+  min-height:58px;
+  padding:6px;
+  border:1px solid #303030;
+  border-radius:13px;
+  background:#0d0d0d;
+  color:#ddd;
+  line-height:1.12
+}
+.theme-choice strong{font-size:12px}
+.theme-choice.active{background:#efefef;color:#111;border-color:#efefef}
+.owner-settings-card{align-items:flex-start}
+.owner-account-list{display:grid;gap:2px;margin-top:10px}
+.owner-account-list a{
+  display:grid;
+  grid-template-columns:68px 1fr;
+  gap:7px;
+  align-items:center;
+  min-height:34px;
+  padding:0 3px;
+  border-radius:9px;
+  color:#ddd;
+  text-decoration:none;
+  font-size:12px
+}
+.owner-account-list a:active{background:#1a1a1a}
+.owner-service{color:#777;font-size:10px;font-weight:800;text-transform:uppercase}
+.account-action-button{
+  width:100%;
+  min-height:46px;
+  border:1px solid #333;
+  border-radius:14px;
+  background:#141414;
+  color:#eee;
+  font-weight:800
+}
+
+/* ===== Login / Google auth ===== */
+.login-card-polished{box-shadow:0 22px 70px rgba(0,0,0,.45)}
+.login-inline-text{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  flex-wrap:wrap;
+  gap:5px;
+  margin-top:12px;
+  color:#777;
+  font-size:11px
+}
+.login-guest-line{margin-top:9px}
+.login-link-button{
+  padding:2px 3px;
+  border:0;
+  background:transparent;
+  color:#5ca8ff;
+  font-size:11px;
+  font-weight:800
+}
+.google-login-button{
+  width:100%;
+  min-height:48px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:9px;
+  margin-top:14px;
+  border:0;
+  border-radius:12px;
+  background:#f2f2f2;
+  color:#111;
+  font-weight:800
+}
+.google-g{
+  width:23px;
+  height:23px;
+  display:grid;
+  place-items:center;
+  border:1px solid #d2d2d2;
+  border-radius:50%;
+  background:#fff;
+  font-family:Arial,sans-serif;
+  font-weight:900
+}
+.login-warning{
+  margin-top:12px;
+  padding:9px 10px;
+  border:1px solid #5f3a2b;
+  border-radius:10px;
+  background:#21140f;
+  color:#ffcfbd;
+  font-size:10px;
+  line-height:1.45
+}
+.login-primary:disabled,.login-secondary:disabled,.google-login-button:disabled{opacity:.55;pointer-events:none}
+.setup-choice-card,.profile-setup-card,.username-edit-card{text-align:center}
+.setup-avatar{
+  width:112px;
+  height:112px;
+  display:block;
+  margin:3px auto 13px;
+  border:1px solid #303030;
+  border-radius:50%;
+  object-fit:cover;
+  background:#0d0d0d
+}
+.setup-avatar-picker{
+  width:100%;
+  padding:0 0 9px;
+  border:0;
+  background:transparent;
+  color:#aaa;
+  font-size:11px;
+  font-weight:800
+}
+.setup-avatar-picker .setup-avatar{margin-bottom:7px}
+.profile-field-label{
+  display:block;
+  margin:3px 0 6px;
+  color:#8d8d8d;
+  text-align:left;
+  font-size:10px;
+  font-weight:800
+}
+.profile-username-input{
+  width:100%;
+  height:46px;
+  padding:0 12px;
+  border:1px solid #333;
+  border-radius:12px;
+  outline:0;
+  background:#171717;
+  color:#f4f4f4;
+  font-size:15px;
+  font-weight:700
+}
+.profile-username-input:focus{border-color:#626262}
+.username-counter{margin-top:5px;color:#6f6f6f;text-align:right;font-size:9px}
+
+/* ===== Theme system ===== */
+html[data-theme="black"]{color-scheme:dark}
+html[data-theme="white"]{color-scheme:light;--bg:#f5f5f5;--panel:#fff;--panel2:#f0f0f0;--line:#d8d8d8;--text:#111;--muted:#656565}
+html[data-theme="white"],html[data-theme="white"] body{background:#f5f5f5;color:#111}
+html[data-theme="white"] .app-shell,
+html[data-theme="white"] .topbar,
+html[data-theme="white"] .composer,
+html[data-theme="white"] .sidebar,
+html[data-theme="white"] .tools-overlay,
+html[data-theme="white"] .settings-overlay,
+html[data-theme="white"] .settings-header,
+html[data-theme="white"] .login-gate{background:#f5f5f5;color:#111}
+html[data-theme="white"] .topbar,html[data-theme="white"] .settings-header{border-color:#e2e2e2}
+html[data-theme="white"] .sidebar{border-color:#ddd}
+html[data-theme="white"] .composer-inner,
+html[data-theme="white"] .login-card,
+html[data-theme="white"] .settings-card,
+html[data-theme="white"] .plugin-menu,
+html[data-theme="white"] .tool-section,
+html[data-theme="white"] .path-card,
+html[data-theme="white"] .th3-device-card{background:#fff;color:#111;border-color:#d8d8d8}
+html[data-theme="white"] .sidebar-action,html[data-theme="white"] .sidebar-link,html[data-theme="white"] .recent-item{color:#222}
+html[data-theme="white"] .recent-item.current,html[data-theme="white"] .sidebar-action:active{background:#e9e9e9;color:#111}
+html[data-theme="white"] .user-bubble{background:#e7e7e7;color:#111}
+html[data-theme="white"] .profile-username{color:#111}
+html[data-theme="white"] .profile-avatar-button{background:#fff;border-color:#d5d5d5}
+html[data-theme="white"] .language-choice,html[data-theme="white"] .theme-choice,html[data-theme="white"] .account-action-button,html[data-theme="white"] .login-secondary,html[data-theme="white"] .profile-username-input{background:#fff;color:#111;border-color:#d2d2d2}
+html[data-theme="white"] .language-choice.active,html[data-theme="white"] .theme-choice.active,html[data-theme="white"] .login-primary{background:#111;color:#fff;border-color:#111}
+html[data-theme="white"] .owner-account-list a{color:#222}
+html[data-theme="white"] .icon-btn:active,html[data-theme="white"] .owner-account-list a:active{background:#e7e7e7}
+html[data-theme="white"] .login-language-block{background:#fafafa;border-color:#dedede}
+html[data-theme="white"] .plugin-option{color:#111}
+html[data-theme="white"] .plugin-option.selected,html[data-theme="white"] .plugin-option:active{background:#ededed}
+
+html[data-theme="fortnite"]{
+  color-scheme:dark;
+  --bg:#06100d;
+  --panel:#0a1713;
+  --panel2:#0d211a;
+  --line:#21483a;
+  --text:#f1fff8;
+  --muted:#82a99a;
+  --override-green:#8cff37;
+  --override-cyan:#29e7ff;
+  --override-purple:#8b5cff;
+  --override-deep:#06100d
+}
+html[data-theme="fortnite"],html[data-theme="fortnite"] body{
+  background:#06100d;
+  color:#f1fff8
+}
+html[data-theme="fortnite"] body::before{
+  content:"";
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:-1;
+  background:
+    linear-gradient(rgba(140,255,55,.035) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(41,231,255,.028) 1px,transparent 1px);
+  background-size:34px 34px;
+  mask-image:linear-gradient(to bottom,rgba(0,0,0,.9),rgba(0,0,0,.22));
+  -webkit-mask-image:linear-gradient(to bottom,rgba(0,0,0,.9),rgba(0,0,0,.22))
+}
+html[data-theme="fortnite"] .app-shell,
+html[data-theme="fortnite"] .chat,
+html[data-theme="fortnite"] .tools-overlay,
+html[data-theme="fortnite"] .settings-overlay,
+html[data-theme="fortnite"] .login-gate{
+  background:
+    radial-gradient(circle at 12% 8%,rgba(140,255,55,.12),transparent 27%),
+    radial-gradient(circle at 88% 15%,rgba(41,231,255,.10),transparent 25%),
+    radial-gradient(circle at 70% 92%,rgba(139,92,255,.10),transparent 30%),
+    repeating-linear-gradient(0deg,rgba(255,255,255,.012) 0 1px,transparent 1px 5px),
+    linear-gradient(155deg,#071611 0%,#06100d 44%,#07101a 100%)
+}
+html[data-theme="fortnite"] .topbar,
+html[data-theme="fortnite"] .composer,
+html[data-theme="fortnite"] .settings-header,
+html[data-theme="fortnite"] .tools-header,
+html[data-theme="fortnite"] .sidebar{
+  background:rgba(5,16,13,.94);
+  border-color:#1c4c3a;
+  backdrop-filter:blur(16px);
+  -webkit-backdrop-filter:blur(16px)
+}
+html[data-theme="fortnite"] .topbar,
+html[data-theme="fortnite"] .settings-header,
+html[data-theme="fortnite"] .tools-header{
+  box-shadow:0 1px 0 rgba(140,255,55,.10)
+}
+html[data-theme="fortnite"] .brand-avatar,
+html[data-theme="fortnite"] .profile-avatar-button{
+  border-color:#4f8e64;
+  box-shadow:0 0 0 2px rgba(41,231,255,.06),0 0 26px rgba(140,255,55,.08)
+}
+html[data-theme="fortnite"] .composer-inner,
+html[data-theme="fortnite"] .login-card,
+html[data-theme="fortnite"] .settings-card,
+html[data-theme="fortnite"] .plugin-menu,
+html[data-theme="fortnite"] .tool-card,
+html[data-theme="fortnite"] .path-card,
+html[data-theme="fortnite"] .th3-device-card,
+html[data-theme="fortnite"] .tool-empty,
+html[data-theme="fortnite"] .tool-result{
+  background:linear-gradient(145deg,rgba(10,27,21,.98),rgba(7,18,15,.98));
+  border-color:#24513f;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025),0 10px 34px rgba(0,0,0,.12)
+}
+html[data-theme="fortnite"] .settings-card,
+html[data-theme="fortnite"] .login-card{
+  position:relative;
+  overflow:hidden
+}
+html[data-theme="fortnite"] .settings-card::after,
+html[data-theme="fortnite"] .login-card::after{
+  content:"";
+  position:absolute;
+  right:-28px;
+  top:-28px;
+  width:80px;
+  height:80px;
+  border:1px solid rgba(41,231,255,.13);
+  transform:rotate(45deg);
+  pointer-events:none
+}
+html[data-theme="fortnite"] .welcome::before{
+  content:"OVERRIDE // ACTIVE";
+  justify-self:center;
+  margin-bottom:10px;
+  border:1px solid rgba(140,255,55,.35);
+  border-radius:999px;
+  padding:5px 9px;
+  color:#b9ff85;
+  background:rgba(35,75,48,.22);
+  font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+  letter-spacing:.13em;
+  box-shadow:0 0 18px rgba(140,255,55,.08)
+}
+html[data-theme="fortnite"] .welcome h1{
+  text-shadow:0 0 28px rgba(41,231,255,.11)
+}
+html[data-theme="fortnite"] .welcome p,
+html[data-theme="fortnite"] .tool-note,
+html[data-theme="fortnite"] .assistant-name,
+html[data-theme="fortnite"] .sidebar-section-title{
+  color:#82a99a
+}
+html[data-theme="fortnite"] .sidebar-action,
+html[data-theme="fortnite"] .sidebar-link,
+html[data-theme="fortnite"] .recent-item{
+  color:#d8f2e8
+}
+html[data-theme="fortnite"] .sidebar-action:active,
+html[data-theme="fortnite"] .recent-item.current,
+html[data-theme="fortnite"] .plugin-option.selected,
+html[data-theme="fortnite"] .plugin-option:active,
+html[data-theme="fortnite"] .owner-account-list a:active{
+  background:linear-gradient(90deg,rgba(140,255,55,.12),rgba(41,231,255,.07));
+  color:#f4fff9
+}
+html[data-theme="fortnite"] .user-bubble{
+  background:linear-gradient(135deg,#123527,#102d28);
+  border:1px solid #2f6049;
+  color:#f2fff8
+}
+html[data-theme="fortnite"] .inline-code{
+  background:#071c16;
+  border-color:#23503e;
+  color:#baff91
+}
+html[data-theme="fortnite"] .code-block{
+  border-color:#214b3b;
+  background:#06120f
+}
+html[data-theme="fortnite"] .code-head{
+  background:#0b211a;
+  color:#7eb8a4
+}
+html[data-theme="fortnite"] .code-block pre{background:#05100d}
+html[data-theme="fortnite"] .language-choice,
+html[data-theme="fortnite"] .theme-choice,
+html[data-theme="fortnite"] .account-action-button,
+html[data-theme="fortnite"] .login-secondary,
+html[data-theme="fortnite"] .profile-username-input,
+html[data-theme="fortnite"] .tool-button,
+html[data-theme="fortnite"] .tool-subtab,
+html[data-theme="fortnite"] .tools-tab,
+html[data-theme="fortnite"] .tool-searchbar input,
+html[data-theme="fortnite"] .tool-input,
+html[data-theme="fortnite"] .tool-textarea,
+html[data-theme="fortnite"] .tool-select{
+  background:#0a1b15;
+  color:#eafff4;
+  border-color:#285440
+}
+html[data-theme="fortnite"] .language-choice.active,
+html[data-theme="fortnite"] .theme-choice.active,
+html[data-theme="fortnite"] .login-primary,
+html[data-theme="fortnite"] .tool-button.primary,
+html[data-theme="fortnite"] .tools-tab.active{
+  background:linear-gradient(135deg,#9cff45,#61ff7f);
+  color:#07110d;
+  border-color:#9cff45;
+  box-shadow:0 0 22px rgba(140,255,55,.13)
+}
+html[data-theme="fortnite"] .theme-choice.override-theme-choice small{
+  display:block;
+  margin-top:3px;
+  color:#79af9b;
+  font-size:8px;
+  letter-spacing:.12em
+}
+html[data-theme="fortnite"] .theme-choice.override-theme-choice.active small{
+  color:#16301f
+}
+html[data-theme="fortnite"] .tool-subtab.active{
+  background:rgba(41,231,255,.12);
+  color:#b8f8ff;
+  border-color:rgba(41,231,255,.34)
+}
+html[data-theme="fortnite"] .send-btn{
+  background:linear-gradient(135deg,#9cff45,#42f5d4);
+  color:#06110d;
+  box-shadow:0 0 20px rgba(140,255,55,.14)
+}
+html[data-theme="fortnite"] .send-btn:disabled{opacity:.28;box-shadow:none}
+html[data-theme="fortnite"] .profile-username{
+  color:#f3fff9;
+  text-shadow:0 0 16px rgba(140,255,55,.08)
+}
+html[data-theme="fortnite"] .profile-avatar-edit{
+  background:rgba(5,19,14,.88);
+  color:#a9ff78;
+  border-color:#2e6249
+}
+html[data-theme="fortnite"] .settings-card-icon,
+html[data-theme="fortnite"] .generated-file-icon,
+html[data-theme="fortnite"] .device-image-placeholder{
+  background:#0b251b;
+  color:#9cff64;
+  border-color:#285943
+}
+html[data-theme="fortnite"] .owner-account-list a{color:#dff9ed}
+html[data-theme="fortnite"] .generated-file-card{
+  background:#0a1c16;
+  border-color:#28513f
+}
+html[data-theme="fortnite"] .toast{
+  background:#0a1c16;
+  color:#ebfff5;
+  border-color:#2f654c
+}
+html[data-theme="fortnite"] .toast.error{
+  border-color:#7a3c56;
+  color:#ffd7e6
+}
+html[data-theme="fortnite"] ::selection{
+  background:rgba(140,255,55,.32);
+  color:#fff
+}
+@media (prefers-reduced-motion:reduce){
+  html[data-theme="fortnite"] *{
+    scroll-behavior:auto!important;
+    transition-duration:.001ms!important;
+    animation-duration:.001ms!important;
+    animation-iteration-count:1!important
+  }
+}
+
+@media (max-width:520px){
+  .settings-content{padding-top:10px}
+  .profile-avatar-button{width:132px;height:132px}
+  .profile-username{font-size:21px}
+  .settings-card{padding:12px 11px;border-radius:17px}
+  .settings-card-icon{width:40px;height:40px;flex-basis:40px}
+  .language-grid,.theme-grid{gap:6px}
+  .language-choice,.theme-choice{min-height:55px}
+  .login-card{padding:18px 16px}
+}
