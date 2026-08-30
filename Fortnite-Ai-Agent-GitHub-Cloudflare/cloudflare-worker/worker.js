@@ -200,31 +200,26 @@ async function callChat(apiKey, messages, researchMode) {
 }
 
 async function handleImageRequest(request, env, url) {
-  if (!isAllowedOrigin(request, env)) {
-    return json(request, env, { error: "Origin not allowed." }, 403);
-  }
-
-  if (request.headers.get("X-FNAA-Client") !== "web-v1") {
-    return json(request, env, { error: "Invalid client." }, 403);
-  }
-
   const path = String(url.searchParams.get("path") || "").trim();
-  if (!path || path.length > 2400) {
-    return json(request, env, { error: "Invalid asset path." }, 400);
-  }
 
-  // This endpoint only forwards a Fortnite asset path to Dilly's ForceImage export.
-  // It never accepts a custom upstream URL.
-  if (/^https?:\/\//i.test(path)) {
-    return json(request, env, { error: "Invalid asset path." }, 400);
+  if (!path || path.length > 2400 || /^https?:\/\//i.test(path)) {
+    return new Response("Invalid asset path.", {
+      status: 400,
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff"
+      }
+    });
   }
 
   const upstream = new URL(DILLY_EXPORT_BASE);
+  // Dilly docs use Path + ForceImage.
   upstream.searchParams.set("Path", path);
   upstream.searchParams.set("ForceImage", "true");
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 18000);
+  const timer = setTimeout(() => controller.abort(), 20000);
 
   try {
     const response = await fetch(upstream.toString(), {
@@ -232,50 +227,70 @@ async function handleImageRequest(request, env, url) {
       headers: {
         "Accept": "image/png,image/webp,image/*;q=0.9,*/*;q=0.1"
       },
-      signal: controller.signal
+      signal: controller.signal,
+      cf: {
+        cacheEverything: false
+      }
     });
 
-    if (response.status === 404) {
-      return new Response(null, {
-        status: 404,
-        headers: {
-          ...corsHeaders(request, env),
-          "Content-Type": "text/plain; charset=utf-8"
-        }
-      });
-    }
-
     if (!response.ok) {
-      return json(request, env, { error: `Image upstream failed (${response.status}).` }, 502);
+      const status = response.status === 404 ? 404 : 502;
+      return new Response(
+        status === 404 ? "Image Not found error #404" : "Image upstream unavailable.",
+        {
+          status,
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": status === 404 ? "public, max-age=30" : "no-store",
+            "X-Content-Type-Options": "nosniff"
+          }
+        }
+      );
     }
 
     const type = String(response.headers.get("content-type") || "").toLowerCase();
     if (!type.startsWith("image/")) {
-      return new Response(null, {
+      return new Response("Image Not found error #404", {
         status: 404,
         headers: {
-          ...corsHeaders(request, env),
-          "Content-Type": "text/plain; charset=utf-8"
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "public, max-age=30",
+          "X-Content-Type-Options": "nosniff"
         }
       });
     }
 
-    const headers = {
-      ...corsHeaders(request, env),
-      "Content-Type": type,
-      "Cache-Control": "public, max-age=3600",
-      "Content-Disposition": "inline"
-    };
+    const headers = new Headers();
+    headers.set("Content-Type", type.split(";")[0]);
+    headers.set("Cache-Control", "public, max-age=86400, s-maxage=604800, immutable");
+    headers.set("Content-Disposition", "inline");
+    headers.set("X-Content-Type-Options", "nosniff");
+    headers.set("Cross-Origin-Resource-Policy", "cross-origin");
 
-    return new Response(response.body, {
+    const length = response.headers.get("content-length");
+    if (length) headers.set("Content-Length", length);
+
+    // Stream the upstream body directly. Do NOT call arrayBuffer(), blob(), or text().
+    const output = new Response(response.body, {
       status: 200,
       headers
     });
+
+    return output;
   } catch (error) {
-    const message = error?.name === "AbortError"
-      ? "Image request timed out."
-      : "Couldn't reach the image upstream.";
-    return json(request, env, { error: message }, 502);
+    return new Response(
+      error?.name === "AbortError"
+        ? "Image request timed out."
+        : "Image upstream unavailable.",
+      {
+        status: 502,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff"
+        }
+      }
+    );
   } finally {
     clearTimeout(timer);
   }
