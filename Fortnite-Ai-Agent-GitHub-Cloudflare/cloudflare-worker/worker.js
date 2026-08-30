@@ -1,6 +1,7 @@
 const CHAT_MODEL = "openai/gpt-oss-120b";
 const FAST_RESEARCH_MODEL = "groq/compound-mini";
 const DEEP_RESEARCH_MODEL = "groq/compound";
+const DILLY_EXPORT_BASE = "https://export-service-new.dillyapis.com/v1/export";
 
 const RATE_BUCKETS = new Map();
 const RATE_WINDOW_MS = 60_000;
@@ -82,7 +83,7 @@ function corsHeaders(request, env) {
   const origin = request.headers.get("Origin") || "";
   const allowed = getAllowedOrigins(env);
   const headers = {
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, X-FNAA-Client",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
@@ -198,11 +199,99 @@ async function callChat(apiKey, messages, researchMode) {
   });
 }
 
+async function handleImageRequest(request, env, url) {
+  if (!isAllowedOrigin(request, env)) {
+    return json(request, env, { error: "Origin not allowed." }, 403);
+  }
+
+  if (request.headers.get("X-FNAA-Client") !== "web-v1") {
+    return json(request, env, { error: "Invalid client." }, 403);
+  }
+
+  const path = String(url.searchParams.get("path") || "").trim();
+  if (!path || path.length > 2400) {
+    return json(request, env, { error: "Invalid asset path." }, 400);
+  }
+
+  // This endpoint only forwards a Fortnite asset path to Dilly's ForceImage export.
+  // It never accepts a custom upstream URL.
+  if (/^https?:\/\//i.test(path)) {
+    return json(request, env, { error: "Invalid asset path." }, 400);
+  }
+
+  const upstream = new URL(DILLY_EXPORT_BASE);
+  upstream.searchParams.set("Path", path);
+  upstream.searchParams.set("ForceImage", "true");
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 18000);
+
+  try {
+    const response = await fetch(upstream.toString(), {
+      method: "GET",
+      headers: {
+        "Accept": "image/png,image/webp,image/*;q=0.9,*/*;q=0.1"
+      },
+      signal: controller.signal
+    });
+
+    if (response.status === 404) {
+      return new Response(null, {
+        status: 404,
+        headers: {
+          ...corsHeaders(request, env),
+          "Content-Type": "text/plain; charset=utf-8"
+        }
+      });
+    }
+
+    if (!response.ok) {
+      return json(request, env, { error: `Image upstream failed (${response.status}).` }, 502);
+    }
+
+    const type = String(response.headers.get("content-type") || "").toLowerCase();
+    if (!type.startsWith("image/")) {
+      return new Response(null, {
+        status: 404,
+        headers: {
+          ...corsHeaders(request, env),
+          "Content-Type": "text/plain; charset=utf-8"
+        }
+      });
+    }
+
+    const headers = {
+      ...corsHeaders(request, env),
+      "Content-Type": type,
+      "Cache-Control": "public, max-age=3600",
+      "Content-Disposition": "inline"
+    };
+
+    return new Response(response.body, {
+      status: 200,
+      headers
+    });
+  } catch (error) {
+    const message = error?.name === "AbortError"
+      ? "Image request timed out."
+      : "Couldn't reach the image upstream.";
+    return json(request, env, { error: message }, 502);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export default {
   async fetch(request, env) {
+    const url = new URL(request.url);
+
     if (request.method === "OPTIONS") {
       if (!isAllowedOrigin(request, env)) return new Response(null, { status: 403 });
       return new Response(null, { status: 204, headers: corsHeaders(request, env) });
+    }
+
+    if (request.method === "GET" && url.pathname === "/image") {
+      return handleImageRequest(request, env, url);
     }
 
     if (request.method !== "POST") {
@@ -262,7 +351,6 @@ export default {
       let data = await response.json().catch(() => ({}));
 
       if (!response.ok && ["deep", "fast"].includes(inferredMode) && response.status === 400) {
-        // Compatibility fallback: if Compound/tool support changes, keep the site alive.
         response = await callChat(apiKey, messages, "chat");
         data = await response.json().catch(() => ({}));
       }
