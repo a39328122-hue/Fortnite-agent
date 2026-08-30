@@ -537,6 +537,66 @@ html[dir="rtl"] .user-bubble{direction:rtl;text-align:right}
   white-space:pre
 }
 
+/* ===== FNAA Epic Image Resolver (Epic-authored images, no 3D rendering) ===== */
+.mesh-image-panel{
+  border-top:1px solid #222;
+  background:#090909
+}
+
+.mesh-image-panel-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  padding:8px 10px;
+  color:#8e8e8e;
+  font-size:10px
+}
+
+.mesh-image-stage{
+  min-height:116px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:10px;
+  overflow:hidden
+}
+
+.mesh-preview-image{
+  display:block;
+  width:auto;
+  max-width:100%;
+  max-height:360px;
+  border:1px solid #262626;
+  border-radius:12px;
+  background:#050505;
+  object-fit:contain
+}
+
+.mesh-image-status{
+  width:100%;
+  padding:18px 10px;
+  color:#929292;
+  text-align:center;
+  font-size:11px;
+  line-height:1.5;
+  white-space:pre-line
+}
+
+.mesh-image-meta{
+  padding:0 10px 10px;
+  color:#707d76;
+  text-align:center;
+  font-size:9px;
+  line-height:1.4;
+  overflow-wrap:anywhere
+}
+
+html[data-theme="white"] .mesh-image-panel{background:#fafafa;border-color:#ddd}
+html[data-theme="white"] .mesh-preview-image{background:#fff;border-color:#ddd}
+html[data-theme="white"] .mesh-image-status{color:#666}
+html[data-theme="white"] .mesh-image-meta{color:#777}
+
 .tool-external-link{
   display:inline-flex;
   align-items:center;
@@ -1019,241 +1079,32 @@ html[data-theme="white"] .login-language-block{background:#fafafa;border-color:#
 html[data-theme="white"] .plugin-option{color:#111}
 html[data-theme="white"] .plugin-option.selected,html[data-theme="white"] .plugin-option:active{background:#ededed}
 
-html[data-theme="fortnite"]{
-  color-scheme:dark;
-  --bg:#06100d;
-  --panel:#0a1713;
-  --panel2:#0d211a;
-  --line:#21483a;
-  --text:#f1fff8;
-  --muted:#82a99a;
-  --override-green:#8cff37;
-  --override-cyan:#29e7ff;
-  --override-purple:#8b5cff;
-  --override-deep:#06100d
-}
-html[data-theme="fortnite"],html[data-theme="fortnite"] body{
-  background:#06100d;
-  color:#f1fff8
-}
-html[data-theme="fortnite"] body::before{
-  content:"";
-  position:fixed;
-  inset:0;
-  pointer-events:none;
-  z-index:-1;
-  background:
-    linear-gradient(rgba(140,255,55,.035) 1px,transparent 1px),
-    linear-gradient(90deg,rgba(41,231,255,.028) 1px,transparent 1px);
-  background-size:34px 34px;
-  mask-image:linear-gradient(to bottom,rgba(0,0,0,.9),rgba(0,0,0,.22));
-  -webkit-mask-image:linear-gradient(to bottom,rgba(0,0,0,.9),rgba(0,0,0,.22))
-}
+html[data-theme="fortnite"]{color-scheme:dark;--bg:#070717;--panel:#111127;--panel2:#19193a;--line:#39396a;--text:#f8f7ff;--muted:#aaa6cf}
+html[data-theme="fortnite"],html[data-theme="fortnite"] body{background:#070717;color:#f8f7ff}
 html[data-theme="fortnite"] .app-shell,
 html[data-theme="fortnite"] .chat,
 html[data-theme="fortnite"] .tools-overlay,
 html[data-theme="fortnite"] .settings-overlay,
 html[data-theme="fortnite"] .login-gate{
   background:
-    radial-gradient(circle at 12% 8%,rgba(140,255,55,.12),transparent 27%),
-    radial-gradient(circle at 88% 15%,rgba(41,231,255,.10),transparent 25%),
-    radial-gradient(circle at 70% 92%,rgba(139,92,255,.10),transparent 30%),
-    repeating-linear-gradient(0deg,rgba(255,255,255,.012) 0 1px,transparent 1px 5px),
-    linear-gradient(155deg,#071611 0%,#06100d 44%,#07101a 100%)
+    radial-gradient(circle at 20% 15%,rgba(107,82,255,.20),transparent 32%),
+    radial-gradient(circle at 85% 20%,rgba(35,169,255,.13),transparent 28%),
+    linear-gradient(180deg,#090919,#050510)
 }
 html[data-theme="fortnite"] .topbar,
 html[data-theme="fortnite"] .composer,
 html[data-theme="fortnite"] .settings-header,
-html[data-theme="fortnite"] .tools-header,
-html[data-theme="fortnite"] .sidebar{
-  background:rgba(5,16,13,.94);
-  border-color:#1c4c3a;
-  backdrop-filter:blur(16px);
-  -webkit-backdrop-filter:blur(16px)
-}
-html[data-theme="fortnite"] .topbar,
-html[data-theme="fortnite"] .settings-header,
-html[data-theme="fortnite"] .tools-header{
-  box-shadow:0 1px 0 rgba(140,255,55,.10)
-}
-html[data-theme="fortnite"] .brand-avatar,
-html[data-theme="fortnite"] .profile-avatar-button{
-  border-color:#4f8e64;
-  box-shadow:0 0 0 2px rgba(41,231,255,.06),0 0 26px rgba(140,255,55,.08)
-}
+html[data-theme="fortnite"] .sidebar{background:rgba(8,8,24,.96);border-color:#25254c}
 html[data-theme="fortnite"] .composer-inner,
 html[data-theme="fortnite"] .login-card,
 html[data-theme="fortnite"] .settings-card,
-html[data-theme="fortnite"] .plugin-menu,
-html[data-theme="fortnite"] .tool-card,
-html[data-theme="fortnite"] .path-card,
-html[data-theme="fortnite"] .th3-device-card,
-html[data-theme="fortnite"] .tool-empty,
-html[data-theme="fortnite"] .tool-result{
-  background:linear-gradient(145deg,rgba(10,27,21,.98),rgba(7,18,15,.98));
-  border-color:#24513f;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.025),0 10px 34px rgba(0,0,0,.12)
-}
-html[data-theme="fortnite"] .settings-card,
-html[data-theme="fortnite"] .login-card{
-  position:relative;
-  overflow:hidden
-}
-html[data-theme="fortnite"] .settings-card::after,
-html[data-theme="fortnite"] .login-card::after{
-  content:"";
-  position:absolute;
-  right:-28px;
-  top:-28px;
-  width:80px;
-  height:80px;
-  border:1px solid rgba(41,231,255,.13);
-  transform:rotate(45deg);
-  pointer-events:none
-}
-html[data-theme="fortnite"] .welcome::before{
-  content:"OVERRIDE // ACTIVE";
-  justify-self:center;
-  margin-bottom:10px;
-  border:1px solid rgba(140,255,55,.35);
-  border-radius:999px;
-  padding:5px 9px;
-  color:#b9ff85;
-  background:rgba(35,75,48,.22);
-  font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
-  letter-spacing:.13em;
-  box-shadow:0 0 18px rgba(140,255,55,.08)
-}
-html[data-theme="fortnite"] .welcome h1{
-  text-shadow:0 0 28px rgba(41,231,255,.11)
-}
-html[data-theme="fortnite"] .welcome p,
-html[data-theme="fortnite"] .tool-note,
-html[data-theme="fortnite"] .assistant-name,
-html[data-theme="fortnite"] .sidebar-section-title{
-  color:#82a99a
-}
-html[data-theme="fortnite"] .sidebar-action,
-html[data-theme="fortnite"] .sidebar-link,
-html[data-theme="fortnite"] .recent-item{
-  color:#d8f2e8
-}
-html[data-theme="fortnite"] .sidebar-action:active,
-html[data-theme="fortnite"] .recent-item.current,
-html[data-theme="fortnite"] .plugin-option.selected,
-html[data-theme="fortnite"] .plugin-option:active,
-html[data-theme="fortnite"] .owner-account-list a:active{
-  background:linear-gradient(90deg,rgba(140,255,55,.12),rgba(41,231,255,.07));
-  color:#f4fff9
-}
-html[data-theme="fortnite"] .user-bubble{
-  background:linear-gradient(135deg,#123527,#102d28);
-  border:1px solid #2f6049;
-  color:#f2fff8
-}
-html[data-theme="fortnite"] .inline-code{
-  background:#071c16;
-  border-color:#23503e;
-  color:#baff91
-}
-html[data-theme="fortnite"] .code-block{
-  border-color:#214b3b;
-  background:#06120f
-}
-html[data-theme="fortnite"] .code-head{
-  background:#0b211a;
-  color:#7eb8a4
-}
-html[data-theme="fortnite"] .code-block pre{background:#05100d}
-html[data-theme="fortnite"] .language-choice,
-html[data-theme="fortnite"] .theme-choice,
-html[data-theme="fortnite"] .account-action-button,
-html[data-theme="fortnite"] .login-secondary,
-html[data-theme="fortnite"] .profile-username-input,
-html[data-theme="fortnite"] .tool-button,
-html[data-theme="fortnite"] .tool-subtab,
-html[data-theme="fortnite"] .tools-tab,
-html[data-theme="fortnite"] .tool-searchbar input,
-html[data-theme="fortnite"] .tool-input,
-html[data-theme="fortnite"] .tool-textarea,
-html[data-theme="fortnite"] .tool-select{
-  background:#0a1b15;
-  color:#eafff4;
-  border-color:#285440
-}
-html[data-theme="fortnite"] .language-choice.active,
-html[data-theme="fortnite"] .theme-choice.active,
-html[data-theme="fortnite"] .login-primary,
-html[data-theme="fortnite"] .tool-button.primary,
-html[data-theme="fortnite"] .tools-tab.active{
-  background:linear-gradient(135deg,#9cff45,#61ff7f);
-  color:#07110d;
-  border-color:#9cff45;
-  box-shadow:0 0 22px rgba(140,255,55,.13)
-}
-html[data-theme="fortnite"] .theme-choice.override-theme-choice small{
-  display:block;
-  margin-top:3px;
-  color:#79af9b;
-  font-size:8px;
-  letter-spacing:.12em
-}
-html[data-theme="fortnite"] .theme-choice.override-theme-choice.active small{
-  color:#16301f
-}
-html[data-theme="fortnite"] .tool-subtab.active{
-  background:rgba(41,231,255,.12);
-  color:#b8f8ff;
-  border-color:rgba(41,231,255,.34)
-}
-html[data-theme="fortnite"] .send-btn{
-  background:linear-gradient(135deg,#9cff45,#42f5d4);
-  color:#06110d;
-  box-shadow:0 0 20px rgba(140,255,55,.14)
-}
-html[data-theme="fortnite"] .send-btn:disabled{opacity:.28;box-shadow:none}
-html[data-theme="fortnite"] .profile-username{
-  color:#f3fff9;
-  text-shadow:0 0 16px rgba(140,255,55,.08)
-}
-html[data-theme="fortnite"] .profile-avatar-edit{
-  background:rgba(5,19,14,.88);
-  color:#a9ff78;
-  border-color:#2e6249
-}
-html[data-theme="fortnite"] .settings-card-icon,
-html[data-theme="fortnite"] .generated-file-icon,
-html[data-theme="fortnite"] .device-image-placeholder{
-  background:#0b251b;
-  color:#9cff64;
-  border-color:#285943
-}
-html[data-theme="fortnite"] .owner-account-list a{color:#dff9ed}
-html[data-theme="fortnite"] .generated-file-card{
-  background:#0a1c16;
-  border-color:#28513f
-}
-html[data-theme="fortnite"] .toast{
-  background:#0a1c16;
-  color:#ebfff5;
-  border-color:#2f654c
-}
-html[data-theme="fortnite"] .toast.error{
-  border-color:#7a3c56;
-  color:#ffd7e6
-}
-html[data-theme="fortnite"] ::selection{
-  background:rgba(140,255,55,.32);
-  color:#fff
-}
-@media (prefers-reduced-motion:reduce){
-  html[data-theme="fortnite"] *{
-    scroll-behavior:auto!important;
-    transition-duration:.001ms!important;
-    animation-duration:.001ms!important;
-    animation-iteration-count:1!important
-  }
-}
+html[data-theme="fortnite"] .plugin-menu{background:linear-gradient(180deg,rgba(28,27,60,.98),rgba(14,14,35,.98));border-color:#3b3971}
+html[data-theme="fortnite"] .sidebar-action:active,html[data-theme="fortnite"] .recent-item.current,html[data-theme="fortnite"] .plugin-option.selected{background:#232250}
+html[data-theme="fortnite"] .user-bubble{background:#29285b}
+html[data-theme="fortnite"] .language-choice,html[data-theme="fortnite"] .theme-choice,html[data-theme="fortnite"] .account-action-button,html[data-theme="fortnite"] .login-secondary,html[data-theme="fortnite"] .profile-username-input{background:#11112a;border-color:#3a396a}
+html[data-theme="fortnite"] .language-choice.active,html[data-theme="fortnite"] .theme-choice.active,html[data-theme="fortnite"] .login-primary{background:#f1efff;color:#17152f;border-color:#f1efff}
+html[data-theme="fortnite"] .profile-avatar-button{border-color:#4a4890;box-shadow:0 0 0 4px rgba(115,92,255,.08)}
+html[data-theme="fortnite"] .owner-account-list a:active{background:#252452}
 
 @media (max-width:520px){
   .settings-content{padding-top:10px}
