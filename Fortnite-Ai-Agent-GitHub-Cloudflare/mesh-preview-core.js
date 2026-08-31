@@ -387,19 +387,21 @@
 
     const bounds = boundsOf(positions);
 
-    // Normalize around origin. Fortnite meshes are typically Z-up, so rotate into a clean icon angle.
+    // Keep the Fortnite mesh in its native Z-up orientation.
+    // The old build rotated the mesh itself, which could make previews look side-on.
     const translate = mat4Translation(-bounds.cx, -bounds.cy, -bounds.cz);
     const scale = mat4Scale(1 / bounds.radius);
-    const rotZ = mat4RotationZ(-35 * Math.PI / 180);
-    const rotX = mat4RotationX(67 * Math.PI / 180);
+    const model = mat4Multiply(scale, translate);
 
-    let model = mat4Multiply(scale, translate);
-    model = mat4Multiply(rotZ, model);
-    model = mat4Multiply(rotX, model);
+    // Upper 3/4 asset-thumbnail camera.
+    // Very flat meshes get a more top-down angle automatically.
+    const flatness = bounds.sz / Math.max(bounds.sx, bounds.sy, 1e-6);
+    const eye = flatness < 0.20
+      ? [2.25, -2.25, 3.20]
+      : [2.60, -2.60, 2.45];
 
-    const eye = [2.15, 1.55, 2.25];
     const view = mat4LookAt(eye, [0, 0, 0], [0, 0, 1]);
-    const projection = mat4Ortho(-1.18, 1.18, -1.18, 1.18, 0.01, 20);
+    const projection = mat4Ortho(-1.12, 1.12, -1.12, 1.12, 0.01, 20);
     const mvp = mat4Multiply(projection, mat4Multiply(view, model));
 
     const program = createProgram(gl);
@@ -470,7 +472,7 @@
     renderToBlob,
     normalizePositions,
     normalizeIndices,
-    version: "1.0.0"
+    version: "1.1.0"
   });
 
   console.info("FNAA StaticMesh 2D Preview Core loaded.");
