@@ -2,8 +2,9 @@
   "use strict";
 
   const API_ENDPOINT = String(window.FORTNITE_AI_API_ENDPOINT || "").trim().replace(/\/+$/, "");
-  const SESSION_KEY = "fortniteAiAgent.openrouterSession.v2";
-  const LOGIN_PENDING_KEY = "fortniteAiAgent.openrouterLoginPending.v2";
+  const SESSION_KEY = "fortniteAiAgent.openrouterSession.v3";
+  const LOGIN_PENDING_KEY = "fortniteAiAgent.openrouterLoginPending.v3";
+  const PROFILE_PREFIX = "fortniteAiAgent.openrouterProfile.v3.";
   const DEFAULT_AVATAR = "./assets/default-user-avatar.jpeg";
   const MAX_USERNAME_CHARS = 9;
   const MAX_AVATAR_DATA_URL = 180000;
@@ -43,6 +44,41 @@
     try { sessionStorage.removeItem(key); } catch {}
   }
 
+  function profileStorageKey(uid) {
+    return `${PROFILE_PREFIX}${String(uid || "").replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 180)}`;
+  }
+
+  function defaultLocalProfile(uid) {
+    const suffix = String(uid || "").replace(/[^A-Za-z0-9]/g, "").slice(-4) || String(Math.floor(1000 + Math.random() * 9000));
+    return {
+      username: `user${suffix}`.slice(0, 9),
+      avatar: "",
+      setupComplete: true
+    };
+  }
+
+  function loadLocalProfile(uid, fallback = null) {
+    const base = safeProfile(fallback || defaultLocalProfile(uid));
+    try {
+      const raw = storageGet(profileStorageKey(uid));
+      if (!raw) return base;
+      const parsed = JSON.parse(raw);
+      return safeProfile({
+        username: parsed?.username ?? base.username,
+        avatar: parsed?.avatar ?? base.avatar,
+        setupComplete: parsed?.setupComplete !== false
+      });
+    } catch {
+      return base;
+    }
+  }
+
+  function saveLocalProfile(uid, profile) {
+    const clean = safeProfile(profile || {});
+    storageSet(profileStorageKey(uid), JSON.stringify(clean));
+    return clean;
+  }
+
   async function fetchJsonWithTimeout(url, options = {}, timeoutMs = 6500) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -61,10 +97,9 @@
       const { response, data } = await fetchJsonWithTimeout(`${API_ENDPOINT}/health`, {
         method: "GET",
         mode: "cors",
-        cache: "no-store",
-        headers: { "X-FNAA-Client": "web-v5" }
+        cache: "no-store"
       }, 6500);
-      if (!response.ok || data?.ok !== true || data?.openRouterVaultConfigured !== true) {
+      if (!response.ok || data?.ok !== true || data?.authConfigured !== true) {
         throw new Error("LOGIN_UNAVAILABLE");
       }
       return true;
@@ -128,7 +163,7 @@
 
   function cleanSessionToken(value) {
     const token = String(value || "").trim();
-    return /^or_sess_[A-Za-z0-9_-]{32,160}$/.test(token) ? token : "";
+    return /^or_sess_v1\.[A-Za-z0-9_-]{12,64}\.[A-Za-z0-9_-]{40,1800}$/.test(token) ? token : "";
   }
 
   function persistSession(token) {
@@ -174,7 +209,7 @@
 
   async function api(path, { method = "GET", body } = {}) {
     if (!API_ENDPOINT) throw new Error("FNAA API endpoint is not configured.");
-    const headers = { "X-FNAA-Client": "web-v5" };
+    const headers = { "X-FNAA-Client": "web-v6" };
     if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
     if (body !== undefined) headers["Content-Type"] = "application/json";
     const response = await fetch(`${API_ENDPOINT}${path}`, {
@@ -202,8 +237,11 @@
     }
     try {
       const data = await api("/auth/session");
-      currentProfile = safeProfile(data.profile || {});
-      currentUser = safeUser(data.user || { uid: data.uid, displayName: currentProfile.username });
+      const rawUser = data.user || { uid: data.uid, displayName: "" };
+      const uid = String(rawUser?.uid || data.uid || "");
+      if (!uid) throw new Error("Invalid OpenRouter account session.");
+      currentProfile = loadLocalProfile(uid, data.profile || defaultLocalProfile(uid));
+      currentUser = safeUser({ uid, displayName: currentProfile.username });
       lastError = null;
       publish();
       return !!currentUser;
@@ -219,7 +257,6 @@
 
   async function signInOpenRouter() {
     if (!configured) throw new Error("LOGIN_UNAVAILABLE");
-    await checkLoginService();
 
     const returnTo = `${location.origin}${location.pathname}`;
     const url = new URL(`${API_ENDPOINT}/auth/openrouter/start`);
@@ -236,9 +273,26 @@
 
   async function saveProfile(patch) {
     if (!currentUser || !sessionToken) throw new Error("Log in first.");
-    const data = await api("/profile", { method: "POST", body: patch });
-    currentProfile = safeProfile(data.profile || {});
-    currentUser = safeUser(data.user || { uid: currentUser.uid, displayName: currentProfile.username });
+    const next = {
+      ...(currentProfile || defaultLocalProfile(currentUser.uid))
+    };
+
+    if (Object.prototype.hasOwnProperty.call(patch || {}, "username")) {
+      next.username = normalizeUsername(patch.username);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch || {}, "avatar")) {
+      const avatar = String(patch.avatar || "");
+      if (avatar && (!avatar.startsWith("data:image/jpeg;base64,") || avatar.length > MAX_AVATAR_DATA_URL)) {
+        throw new Error("The avatar is invalid or too large.");
+      }
+      next.avatar = avatar;
+    }
+    if (Object.prototype.hasOwnProperty.call(patch || {}, "setupComplete")) {
+      next.setupComplete = patch.setupComplete === true;
+    }
+
+    currentProfile = saveLocalProfile(currentUser.uid, next);
+    currentUser = safeUser({ uid: currentUser.uid, displayName: currentProfile.username });
     publish();
     return { ...currentProfile };
   }
