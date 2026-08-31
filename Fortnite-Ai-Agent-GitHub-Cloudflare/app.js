@@ -9,13 +9,13 @@
   const GENERATED_FILE_NAME = "Subscribe to my YT channel @27lf.txt";
   const THEME_KEY = "fortniteAiAgent.theme.v1";
   const DEFAULT_USER_AVATAR = "./assets/default-user-avatar.jpeg";
+  const FNAA_CLIENT = "web-v7";
 
   const PLUGINS = [
-    { id:"deep", label:"DeepResearch", command:"@DeepResearch", description:"Current multi-source Fortnite research", icon:"DR" },
-    { id:"sm", label:"SearchForSM_", command:"@SearchForSM_", description:"Search Static Mesh paths", icon:"SM" },
-    { id:"m", label:"SearchForM_", command:"@SearchForM_", description:"Search Materials and Material Instances", icon:"M" },
-    { id:"meshes", label:"SearchForMeshes", command:"@SearchForMeshes", description:"Search mesh paths and references", icon:"MSH" },
-    { id:"all", label:"SearchFortniteFiles", command:"@SearchFortniteFiles", description:"Search the full Fortnite database", icon:"ALL" }
+    { id:"path", label:"SearchForPath", command:"@SearchForPath", description:"Search Fortnite asset paths", icon:"PATH" },
+    { id:"setup-mesh", label:"SetupMeshMethod", command:"@SetupMeshMethod", description:"Android setup", icon:"SET" },
+    { id:"setup-orange", label:"SetupOrangeCopy", command:"@SetupOrangeCopy", description:"Android setup", icon:"SET" },
+    { id:"setup-dev", label:"SetupDevInventory", command:"@SetupDevInventory", description:"Android setup", icon:"SET" }
   ];
 
   const $ = (id) => document.getElementById(id);
@@ -327,7 +327,7 @@
     }
   }
   function appendInline(parent,text){
-    const re=/(`[^`\n]+`|\*\*[^*\n]+\*\*|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))/g;
+    const re=/(`[^`\n]+`|\*\*[^*\n]+\*\*|#[^#\n]+#\(https?:\/\/[^\s)]+\)|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))/g;
     let last=0,m;
     while((m=re.exec(text))!==null){
       if(m.index>last) parent.append(document.createTextNode(text.slice(last,m.index)));
@@ -336,6 +336,17 @@
         const e=document.createElement("code"); e.className="inline-code"; e.textContent=token.slice(1,-1); parent.append(e);
       }else if(token.startsWith("**")){
         const e=document.createElement("strong"); e.textContent=token.slice(2,-2); parent.append(e);
+      }else if(token.startsWith("#")){
+        const lm=token.match(/^#([^#\n]+)#\((https?:\/\/[^\s)]+)\)$/);
+        if(lm){
+          const a=document.createElement("a");
+          a.className="fnaa-masked-link";
+          a.textContent=lm[1];
+          a.href=lm[2];
+          a.target="_blank";
+          a.rel="noopener noreferrer";
+          parent.append(a);
+        }
       }else{
         const lm=token.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/);
         if(lm){ const a=document.createElement("a"); a.textContent=lm[1]; a.href=lm[2]; a.target="_blank"; a.rel="noopener noreferrer"; parent.append(a); }
@@ -369,6 +380,28 @@
     meta.append(name,type);card.append(icon,meta,dl);parent.append(card);
   }
 
+  function compactHistoryForApi(messages){
+    const source=Array.isArray(messages)?messages:[];
+    const out=[];
+    let budget=15000;
+
+    // Build newest-first, then reverse so recent context is preserved.
+    for(let i=source.length-1;i>=0&&out.length<8&&budget>0;i--){
+      const item=source[i];
+      if(!item||!["user","assistant"].includes(item.role))continue;
+      let content=String(item.content||"").trim();
+      if(!content)continue;
+
+      // Never send generated TXT attachments or any other extra message fields.
+      // Large local-search attachments stay local in the browser only.
+      content=content.slice(0,Math.min(3500,budget));
+      budget-=content.length;
+      out.push({role:item.role,content});
+    }
+
+    return out.reverse();
+  }
+
   async function sendMessage(){
     if(busy) return;
     const text=els.input.value.trim();
@@ -380,21 +413,31 @@
 
     const plugin=parsePlugin(text);
     try{
-      if(plugin&&["sm","m","meshes","all"].includes(plugin.id)){
-        const result=await searchDatabase(plugin.id,plugin.query);
+      if(plugin?.id==="path"){
         removeTypingIndicator();
-        const reply=formatDatabaseResult(plugin,result);
-        const msg={role:"assistant",content:reply.content};
-        if(reply.attachment) msg.attachment=reply.attachment;
-        chat.messages.push(msg);
+
+        if(!plugin.query){
+          chat.messages.push({
+            role:"assistant",
+            content:`Type what u want to search after \`${plugin.command}\`.`
+          });
+        }else{
+          addTypingIndicator();
+          const result=await searchDatabase("all",plugin.query);
+          removeTypingIndicator();
+
+          const reply=formatDatabaseResult(plugin,result);
+          const msg={role:"assistant",content:reply.content};
+          if(reply.attachment) msg.attachment=reply.attachment;
+          chat.messages.push(msg);
+        }
       }else{
-        const mode=plugin?.id==="deep"?"deep-research":"chat";
         const response=await fetchWithTimeout(API_ENDPOINT,{
           method:"POST",
-          headers:{"Content-Type":"application/json","X-FNAA-Client":"web-v1"},
+          headers:{"Content-Type":"application/json","X-FNAA-Client":FNAA_CLIENT},
           body:JSON.stringify({
-            mode,
-            messages:chat.messages.slice(-12)
+            mode:"chat",
+            messages:compactHistoryForApi(chat.messages)
           })
         },45000);
         const data=await response.json().catch(()=>({}));
@@ -423,8 +466,7 @@
     return null;
   }
   function formatDatabaseResult(plugin,result){
-    if(!plugin.query) return {content:`Type what u want to search after \`${plugin.command}\`.`};
-    if(!result?.results?.length) return {content:`I searched the Fortnite database for \`${plugin.query}\` and couldn't find a close result.`};
+        if(!result?.results?.length) return {content:`I searched the Fortnite database for \`${plugin.query}\` and couldn\'t find a matching path.`};
     const exact=result.results.filter(r=>r.match==="exact").length;
     let content=exact
       ?`Found **${result.total}** result${result.total===1?"":"s"}.\n\n`
@@ -475,8 +517,8 @@
 
     pluginMenu.replaceChildren();
     const header=document.createElement("div");header.className="plugin-panel-header";
-    const title=document.createElement("strong");title.textContent="Plugins";
-    const badge=document.createElement("span");badge.className="plugin-panel-badge";badge.textContent="Fortnite";
+    const title=document.createElement("strong");title.textContent="Commands";
+    const badge=document.createElement("span");badge.className="plugin-panel-badge";badge.textContent="FNAA";
     header.append(title,badge);pluginMenu.append(header);
 
     visible.forEach((p,index)=>{
