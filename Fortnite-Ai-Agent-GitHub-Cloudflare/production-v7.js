@@ -1,13 +1,14 @@
 (() => {
   "use strict";
 
-  const VERSION = "7.3";
+  const VERSION = "7.4.2";
   const CURRENT_FN_VERSION = "42.00";
   const API_ENDPOINT = String(window.FORTNITE_AI_API_ENDPOINT || "").trim().replace(/\/+$/, "");
   const LOGIN_MODE_KEY = "fortniteAiAgent.loginMode.session";
   const GUEST_ID_KEY = "fortniteAiAgent.guestId.v6";
   const GUEST_NEXT_AT = "fortniteAiAgent.guestNextAt.v7";
   const GUEST_SLOWMODE_MS = 15000;
+  const FNAA_CLIENT = "web-v7";
   let guestSlowmodeTimer = null;
   const originalFetch = window.fetch.bind(window);
 
@@ -25,8 +26,24 @@
   }
 
 
-  function isLocalDatabaseCommand(text) {
-    return /^\s*@(SearchForSM_|SearchForM_|SearchForMeshes|SearchFortniteFiles)\b/i.test(String(text || ""));
+  function isNoAiCommand(text) {
+    return /^\s*@(SearchForPath|SetupMeshMethod|SetupOrangeCopy|SetupDevInventory)\b/i.test(String(text || ""));
+  }
+
+  function isNaturalSetupRequest(text) {
+    const value = String(text || "").toLowerCase();
+    const asksHow = /\b(how|how to|setup|set up|install|do|use|teach|guide|tutorial|where|put|place)\b/i.test(value)
+      || /شلون|طريقة|سيتب|تنصيب|ثبت|وين|حط|شرح/.test(value);
+    if (!asksHow) return false;
+    return /\bmesh\s*method\b|\borange\s*white\s*copy\b|\borange\/white\s*copy\b|\borange\s*copy\b|\bdev\s*inventory\b|\bdeveloper\s*inventory\b|طريقة\s*الميش|اورنج\s*وايت|ديف\s*انفنتوري/.test(value);
+  }
+
+  function lastUserMessage(messages) {
+    const list = Array.isArray(messages) ? messages : [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i]?.role === "user") return String(list[i].content || "").trim();
+    }
+    return "";
   }
 
   function ensureGuestSlowmodeBanner() {
@@ -280,7 +297,7 @@
   }
 
   function looksLikeAssetQuestion(text) {
-    return /\b(path|asset path|mesh|staticmesh|static mesh|skeletalmesh|texture|material|icon|uasset|fortnite files|sm_|mi_|m_)\b|مسار|باث|ميش|تكستشر|ماتيريال|ملفات اللعبة|ملفات فورتنايت/i.test(text);
+    return /^\s*@SearchForPath\b/i.test(String(text || "")) || /\b(path|asset path|mesh|staticmesh|static mesh|skeletalmesh|texture|material|icon|uasset|fortnite files|sm_|mi_|m_)\b|مسار|باث|ميش|تكستشر|ماتيريال|ملفات اللعبة|ملفات فورتنايت/i.test(text);
   }
 
   function extractVersion(text) {
@@ -290,6 +307,7 @@
 
   function searchScope(text) {
     const low = String(text || "").toLowerCase();
+    if (/^\s*@searchforpath\b/i.test(low)) return "all";
     if (/(^|[\s/._-])sm_/.test(low) || /static\s*mesh/.test(low)) return "sm";
     if (/(^|[\s/._-])(m_|mi_)/.test(low) || /\bmaterial/.test(low)) return "m";
     if (/\b(mesh|meshes|skeletalmesh)\b|ميش/.test(low)) return "meshes";
@@ -297,7 +315,7 @@
   }
 
   function coreSearchQuery(text) {
-    const raw = String(text || "").trim();
+    const raw = String(text || "").trim().replace(/^@SearchForPath\b/i, " ").trim();
     const id = raw.match(/\b(?:SM|SK|M|MI|T|S|A|BP)_[A-Za-z0-9_]+\b/i);
     if (id) return id[0];
     const quoted = raw.match(/["“”']([^"“”']{2,80})["“”']/);
@@ -305,12 +323,30 @@
 
     const cleaned = raw
       .replace(/\bv?\d{1,2}\.\d{1,2}\b/gi, " ")
-      .replace(/\b(give|me|the|a|an|for|of|please|find|search|what|whats|what's|is|path|asset|mesh|static|fortnite|files?|current|latest)\b/gi, " ")
+      .replace(/\b(give|me|the|a|an|for|of|please|find|search|what|whats|what's|is|path|asset|mesh|static|fortnite|files?|current|latest|new)\b/gi, " ")
       .replace(/(انطيني|اعطيني|اريد|شنو|شسم|مسار|باث|مال|ملفات|فورتنايت|الميش|ميش)/g, " ")
       .replace(/[^A-Za-z0-9_\u0600-\u06FF]+/g, " ")
       .replace(/\s+/g, " ")
       .trim();
     return cleaned.slice(0, 100) || raw.slice(0, 100);
+  }
+
+  function compactRequestMessages(messages){
+    const source=Array.isArray(messages)?messages:[];
+    const out=[];
+    let budget=15000;
+
+    for(let i=source.length-1;i>=0&&out.length<8&&budget>0;i--){
+      const item=source[i];
+      if(!item||!["user","assistant"].includes(item.role))continue;
+      let content=String(item.content||"").trim();
+      if(!content)continue;
+      content=content.slice(0,Math.min(3500,budget));
+      budget-=content.length;
+      out.push({role:item.role,content});
+    }
+
+    return out.reverse();
   }
 
   async function buildClientContext(body) {
@@ -359,7 +395,7 @@
 
     const headers = new Headers(input instanceof Request ? input.headers : undefined);
     new Headers(init?.headers || {}).forEach((value, key) => headers.set(key, value));
-    headers.set("X-FNAA-Client", "web-v6");
+    headers.set("X-FNAA-Client", FNAA_CLIENT);
     headers.set("X-FNAA-Guest-ID", uid());
 
     const state = getPublicAuthState();
@@ -370,19 +406,32 @@
     }
 
     let bodyText = init?.body;
+    let noAiRequest = false;
+
     if (typeof bodyText === "string" && headers.get("Content-Type")?.includes("application/json")) {
       try {
         const body = JSON.parse(bodyText);
-        const context = await buildClientContext(body);
-        if (context) body.client_context = context;
+        body.messages = compactRequestMessages(body.messages);
+
+        const lastText = lastUserMessage(body.messages);
+        noAiRequest = isNoAiCommand(lastText) || isNaturalSetupRequest(lastText);
+
+        // Only AI asset/path questions need database context injection.
+        // @SearchForPath is handled locally by app.js and never reaches this request.
+        if (!noAiRequest) {
+          const context = await buildClientContext(body);
+          if (context) body.client_context = context;
+        }
+
         bodyText = JSON.stringify(body);
       } catch {}
     }
 
     const response = await originalFetch(input, { ...init, headers, body: bodyText });
 
-    // Guest slow mode starts only AFTER FNAA has completed a successful AI reply.
-    if (!loggedIn && response.ok) startGuestSlowmode();
+    // Slow mode is only for actual guest AI requests.
+    // Fixed setup replies and local commands do not start it.
+    if (!loggedIn && response.ok && !noAiRequest) startGuestSlowmode();
 
     if (loggedIn && response.status === 401) {
       try { await window.FortniteAuth?.signOut?.(); } catch {}
@@ -419,12 +468,12 @@
     if (!state?.user) {
       const input = document.getElementById("messageInput");
       const text = String(input?.value || "").trim();
-      const localDatabaseCommand = isLocalDatabaseCommand(text);
+      const noAiRequest = isNoAiCommand(text) || isNaturalSetupRequest(text);
       const remaining = guestSlowmodeRemainingMs();
 
-      // Slow mode applies only to AI Agent requests.
-      // Local database commands are not AI requests and stay available.
-      if (!localDatabaseCommand && remaining > 0) {
+      // Slow mode applies only to real AI requests.
+      // Local path search and fixed setup replies stay available.
+      if (!noAiRequest && remaining > 0) {
         event.preventDefault();
         event.stopImmediatePropagation();
         syncGuestSlowmodeUI();
