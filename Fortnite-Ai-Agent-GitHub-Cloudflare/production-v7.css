@@ -263,3 +263,5 @@ html[data-theme="white"] .account-action-button{color:#111!important;-webkit-tex
     touch-action:manipulation;
   }
 }
+
+/* V7.3: stateless OpenRouter auth; no Durable Object dependency. */
