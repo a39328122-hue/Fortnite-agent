@@ -1,12 +1,12 @@
 (() => {
   "use strict";
 
-  const VERSION = "6.2";
+  const VERSION = "6.3";
   const CURRENT_FN_VERSION = "42.00";
   const API_ENDPOINT = String(window.FORTNITE_AI_API_ENDPOINT || "").trim().replace(/\/+$/, "");
   const LOGIN_MODE_KEY = "fortniteAiAgent.loginMode.session";
   const GUEST_ID_KEY = "fortniteAiAgent.guestId.v6";
-  const GUEST_NEXT_AT = "fortniteAiAgent.guestNextAt.v6";
+  const GUEST_NEXT_AT = "fortniteAiAgent.guestNextAt.v63";
   const GUEST_SLOWMODE_MS = 15000;
   let guestSlowmodeTimer = null;
   const originalFetch = window.fetch.bind(window);
@@ -30,14 +30,35 @@
   }
 
 
+  function isLocalDatabaseCommand(text) {
+    return /^\s*@(SearchForSM_|SearchForM_|SearchForMeshes|SearchFortniteFiles)\b/i.test(String(text || ""));
+  }
+
+  function ensureGuestSlowmodeBanner() {
+    let banner = document.getElementById("fnaaGuestSlowmodeBanner");
+    if (banner) return banner;
+    const composer = document.getElementById("composer");
+    const inner = composer?.querySelector(".composer-inner");
+    if (!composer || !inner) return null;
+    banner = document.createElement("div");
+    banner.id = "fnaaGuestSlowmodeBanner";
+    banner.className = "fnaa-guest-slowmode-banner";
+    banner.hidden = true;
+    banner.setAttribute("role", "status");
+    banner.setAttribute("aria-live", "polite");
+    composer.insertBefore(banner, inner);
+    return banner;
+  }
+
   function guestSlowmodeRemainingMs() {
     if (getPublicAuthState()?.user) return 0;
-    return Math.max(0, Number(sessionStorage.getItem(GUEST_NEXT_AT) || 0) - Date.now());
+    return Math.max(0, Number(localStorage.getItem(GUEST_NEXT_AT) || 0) - Date.now());
   }
 
   function syncGuestSlowmodeUI() {
     const input = document.getElementById("messageInput");
     const send = document.getElementById("sendButton");
+    const banner = ensureGuestSlowmodeBanner();
     if (!input || !send) return;
 
     const loggedIn = !!getPublicAuthState()?.user;
@@ -45,23 +66,16 @@
 
     if (remaining > 0) {
       const seconds = Math.max(1, Math.ceil(remaining / 1000));
-      input.disabled = true;
-      input.setAttribute("aria-disabled", "true");
-      input.dataset.fnaaSlowmode = "1";
-      if (!input.dataset.fnaaOriginalPlaceholder) {
-        input.dataset.fnaaOriginalPlaceholder = input.getAttribute("placeholder") || "Message Fortnite Ai Agent";
-      }
-      input.placeholder = `Guest slow mode • ${seconds}s`;
-
+      // Slow mode only blocks sending another AI message.
+      // Typing, Settings, sidebar and all Fortnite tools remain usable.
       send.disabled = true;
       send.dataset.fnaaSlowmode = "1";
-      if (!send.dataset.fnaaOriginalText) send.dataset.fnaaOriginalText = send.textContent || "↑";
-      send.textContent = String(seconds);
       document.documentElement.classList.add("fnaa-guest-slowmode-active");
-
-      if (!guestSlowmodeTimer) {
-        guestSlowmodeTimer = setInterval(syncGuestSlowmodeUI, 250);
+      if (banner) {
+        banner.hidden = false;
+        banner.textContent = `Slow mode enabled • ${seconds}s`;
       }
+      if (!guestSlowmodeTimer) guestSlowmodeTimer = setInterval(syncGuestSlowmodeUI, 200);
       return;
     }
 
@@ -71,27 +85,21 @@
     }
 
     document.documentElement.classList.remove("fnaa-guest-slowmode-active");
-
-    if (input.dataset.fnaaSlowmode === "1") {
-      input.disabled = false;
-      input.removeAttribute("aria-disabled");
-      delete input.dataset.fnaaSlowmode;
-      input.placeholder = input.dataset.fnaaOriginalPlaceholder || "Message Fortnite Ai Agent";
-      delete input.dataset.fnaaOriginalPlaceholder;
+    if (banner) {
+      banner.hidden = true;
+      banner.textContent = "";
     }
 
     if (send.dataset.fnaaSlowmode === "1") {
       delete send.dataset.fnaaSlowmode;
-      send.textContent = send.dataset.fnaaOriginalText || "↑";
-      delete send.dataset.fnaaOriginalText;
-      // Let app.js recalculate the correct enabled state without guessing its busy state.
+      // app.js owns the normal busy/empty send-button state.
       input.dispatchEvent(new Event("input", { bubbles: true }));
     }
   }
 
   function startGuestSlowmode() {
     if (getPublicAuthState()?.user) return;
-    sessionStorage.setItem(GUEST_NEXT_AT, String(Date.now() + GUEST_SLOWMODE_MS));
+    localStorage.setItem(GUEST_NEXT_AT, String(Date.now() + GUEST_SLOWMODE_MS));
     syncGuestSlowmodeUI();
   }
 
@@ -634,6 +642,10 @@
       } catch {}
     }
 
+    // Start guest slow mode only when an actual request is sent to the AI backend.
+    // Local database commands and the separate Tools UI do not trigger it.
+    if (!loggedIn) startGuestSlowmode();
+
     const response = await originalFetch(input, { ...init, headers, body: bodyText });
 
     if (loggedIn && (response.status === 428 || response.status === 401)) {
@@ -649,8 +661,8 @@
     if (!loggedIn && response.status === 429) {
       const retry = Math.max(1, Number(response.headers.get("Retry-After") || 15));
       const serverUntil = Date.now() + retry * 1000;
-      const currentUntil = Number(sessionStorage.getItem(GUEST_NEXT_AT) || 0);
-      sessionStorage.setItem(GUEST_NEXT_AT, String(Math.max(currentUntil, serverUntil)));
+      const currentUntil = Number(localStorage.getItem(GUEST_NEXT_AT) || 0);
+      localStorage.setItem(GUEST_NEXT_AT, String(Math.max(currentUntil, serverUntil)));
       syncGuestSlowmodeUI();
     }
 
@@ -670,23 +682,32 @@
     }
 
     if (!state?.user) {
+      const input = document.getElementById("messageInput");
+      const text = String(input?.value || "").trim();
+      const localDatabaseCommand = isLocalDatabaseCommand(text);
       const remaining = guestSlowmodeRemainingMs();
-      if (remaining > 0) {
+
+      // Slow mode applies only to AI Agent requests.
+      // Local database commands are not AI requests and stay available.
+      if (!localDatabaseCommand && remaining > 0) {
         event.preventDefault();
         event.stopImmediatePropagation();
         syncGuestSlowmodeUI();
-        showToast(`Guest slow mode: ${Math.ceil(remaining / 1000)}s`, true);
+        showToast(`Slow mode enabled • ${Math.ceil(remaining / 1000)}s`, true);
         return;
-      }
-
-      const input = document.getElementById("messageInput");
-      const send = document.getElementById("sendButton");
-      if (input?.value.trim() && !send?.disabled) {
-        // Start immediately when the message is accepted by the UI, like Discord slow mode.
-        startGuestSlowmode();
       }
     }
   }, true);
+
+
+  document.addEventListener("input", (event) => {
+    if (event.target?.id !== "messageInput") return;
+    if (guestSlowmodeRemainingMs() > 0) queueMicrotask(syncGuestSlowmodeUI);
+  }, true);
+
+  window.addEventListener("storage", (event) => {
+    if (event.key === GUEST_NEXT_AT) syncGuestSlowmodeUI();
+  });
 
   async function handleLoggedInApiState(detail) {
     document.documentElement.classList.add("fnaa-api-required");
