@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "7.2";
+  const VERSION = "7.3";
   const CURRENT_FN_VERSION = "42.00";
   const API_ENDPOINT = String(window.FORTNITE_AI_API_ENDPOINT || "").trim().replace(/\/+$/, "");
   const LOGIN_MODE_KEY = "fortniteAiAgent.loginMode.session";
@@ -188,7 +188,9 @@
 
   async function disconnectOpenRouter() {
     await window.FortniteAuth?.signOut?.();
-    ensureApiGate().hidden = true;
+    document.documentElement.classList.remove("fnaa-api-required");
+    syncGuestUI();
+    syncSettingsApiCard();
   }
 
   function ensureSettingsApiCard() {
@@ -357,7 +359,7 @@
 
     const headers = new Headers(input instanceof Request ? input.headers : undefined);
     new Headers(init?.headers || {}).forEach((value, key) => headers.set(key, value));
-    headers.set("X-FNAA-Client", "web-v3");
+    headers.set("X-FNAA-Client", "web-v6");
     headers.set("X-FNAA-Guest-ID", uid());
 
     const state = getPublicAuthState();
@@ -383,7 +385,7 @@
     if (!loggedIn && response.ok) startGuestSlowmode();
 
     if (loggedIn && response.status === 401) {
-      try { await window.FortniteAuth?.refresh?.(); } catch {}
+      try { await window.FortniteAuth?.signOut?.(); } catch {}
     }
 
     if (!loggedIn && response.status === 429) {
