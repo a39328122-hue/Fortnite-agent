@@ -54,6 +54,11 @@
   maybeShowLoginGate();
   syncVisualViewport();
 
+  window.addEventListener("pageshow",()=>{
+    // Browsers can restore this page from back-forward cache after backing out of OpenRouter.
+    resetOpenRouterButton();
+  });
+
   function syncVisualViewport(){
     const vv=window.visualViewport;
     const height=Math.round(vv?.height||window.innerHeight);
@@ -574,8 +579,10 @@
     handleAuthState(state);
 
     if(state.user){
-      if(state.profile && state.profile.setupComplete===false) showSetupChoice();
-      else els.loginGate.hidden=true;
+      els.loginGate.hidden=true;
+      if(state.profile && state.profile.setupComplete===false){
+        window.FortniteAuth?.skipSetup?.().catch(()=>{});
+      }
       return;
     }
 
@@ -591,16 +598,12 @@
     };
 
     if(accountState.user){
-      sessionStorage.setItem(LOGIN_MODE_SESSION,"google");
-      const setupAlreadyOpen=!!els.loginGate.querySelector("#setupSure,#setupUsername");
-      const editorOpen=!!els.loginGate.querySelector("#usernameEditInput");
-
-      if(accountState.profile?.setupComplete===false && !setupAlreadyOpen){
-        showSetupChoice();
-      }else if(accountState.profile?.setupComplete===true && !editorOpen){
-        els.loginGate.hidden=true;
+      sessionStorage.setItem(LOGIN_MODE_SESSION,"openrouter");
+      els.loginGate.hidden=true;
+      if(accountState.profile?.setupComplete===false){
+        window.FortniteAuth?.skipSetup?.().catch(()=>{});
       }
-    }else if(sessionStorage.getItem(LOGIN_MODE_SESSION)==="google"){
+    }else if(sessionStorage.getItem(LOGIN_MODE_SESSION)==="openrouter"){
       sessionStorage.removeItem(LOGIN_MODE_SESSION);
       if(els.loginGate.hidden) showWelcomeGate();
     }
@@ -620,91 +623,88 @@
   function showWelcomeGate(){
     els.loginGate.hidden=false;
     els.loginGate.innerHTML=`
-      <div class="login-card login-card-polished">
+      <div class="login-card login-card-polished fnaa-login-simple">
         <h1 class="login-brand brand-with-avatar">
           <img class="brand-avatar login-brand-avatar" src="./assets/fnaa-avatar.jpeg" alt="" />
-          <span data-i18n="brand">Fortnite Ai Agent</span>
+          <span>Fortnite Ai Agent</span>
         </h1>
-        <p data-i18n="loginWelcome">Log in to use your Fortnite Ai Agent account.</p>
+        <p class="fnaa-login-provider-note">Sign in with OpenRouter.</p>
 
-        <div class="login-language-block">
-          <div class="login-language-title" data-i18n="language">Language</div>
-          <div class="language-grid compact">
-            <button type="button" class="language-choice" data-set-language="en"><strong>English</strong><small>EN</small></button>
-            <button type="button" class="language-choice" data-set-language="fr"><strong>Français</strong><small>FR</small></button>
-            <button type="button" class="language-choice" data-set-language="ar"><strong>العربية</strong><small>AR</small></button>
-          </div>
-        </div>
+        <button class="login-primary openrouter-login-button" id="loginMain" type="button">
+          Continue with OpenRouter
+        </button>
+        <div id="openRouterLoginStatus" class="fnaa-login-status" role="status" aria-live="polite"></div>
 
-        <button class="login-primary" id="loginMain" type="button" data-i18n="login">Log in</button>
-        <div class="login-inline-text">
-          <span data-i18n="noAccount">you don’t have an account?</span>
-          <button class="login-link-button" id="signupMain" type="button" data-i18n="signupFree">sign up For free</button>
-        </div>
         <div class="login-inline-text login-guest-line">
           <span data-i18n="continueAs">Continue as a</span>
           <button class="login-link-button" id="loginGuest" type="button" data-i18n="guest">guest</button>
         </div>
       </div>`;
     window.FortniteI18n?.apply(els.loginGate);
-    $("loginMain").addEventListener("click",()=>showGoogleLogin("login"));
-    $("signupMain").addEventListener("click",()=>showGoogleLogin("signup"));
+    $("loginMain").addEventListener("click",showOpenRouterLogin);
     $("loginGuest").addEventListener("click",continueAsGuest);
+
+    const authState=window.FortniteAuth?.getState?.()||{};
+    if(authState.error){
+      const status=$("openRouterLoginStatus");
+      if(status){
+        status.textContent=friendlyAuthError(authState.error);
+        status.classList.add("error");
+      }
+    }
   }
 
-  function showGoogleLogin(kind="login"){
-    els.loginGate.hidden=false;
-    const title=kind==="signup"?"Create account":"Log in";
-    els.loginGate.innerHTML=`
-      <div class="login-card login-card-polished">
-        <button class="login-back" id="googleBack" type="button" aria-label="Back">‹</button>
-        <h1>${title}</h1>
-        <p data-i18n="googleLoginHint">Use Google. We never receive or store your Google password.</p>
-        <button class="google-login-button" id="useGoogle" type="button"><span class="google-g">G</span><span data-i18n="useGoogle">Use your Google</span></button>
-        <button class="login-secondary" id="addGoogle" type="button" data-i18n="addAccount">Add another account</button>
-        <div class="login-inline-text login-guest-line">
-          <span data-i18n="continueAs">Continue as a</span>
-          <button class="login-link-button" id="googleGuest" type="button" data-i18n="guest">guest</button>
-        </div>
-        <div id="firebaseSetupWarning" class="login-warning" hidden></div>
-      </div>`;
-    window.FortniteI18n?.apply(els.loginGate);
-
-    $("googleBack").addEventListener("click",showWelcomeGate);
-    $("googleGuest").addEventListener("click",continueAsGuest);
-
-    const login=async(forceChooser)=>{
-      const api=window.FortniteAuth;
-      if(!api?.configured){
-        const warning=$("firebaseSetupWarning");
-        warning.hidden=false;
-        warning.textContent="Firebase isn't configured yet. Finish firebase-config.js first.";
-        return;
-      }
-
-      const buttons=[$("useGoogle"),$("addGoogle")];
-      buttons.forEach(b=>b.disabled=true);
-      try{
-        if(forceChooser) await api.signInAnother();
-        else await api.signInDefault();
-      }catch(error){
-        const message=friendlyAuthError(error);
-        showToast(message,true);
-        buttons.forEach(b=>b.disabled=false);
-      }
-    };
-
-    $("useGoogle").addEventListener("click",()=>login(false));
-    $("addGoogle").addEventListener("click",()=>login(true));
+  function resetOpenRouterButton(){
+    const button=$("loginMain");
+    if(!button)return;
+    button.disabled=false;
+    button.textContent="Continue with OpenRouter";
   }
+
+  async function showOpenRouterLogin(){
+    const api=window.FortniteAuth;
+    const button=$("loginMain");
+    const status=$("openRouterLoginStatus");
+
+    if(!api?.configured){
+      if(status){
+        status.textContent="Account login is temporarily unavailable.";
+        status.classList.add("error");
+      }
+      return;
+    }
+
+    if(button){
+      button.disabled=true;
+      button.textContent="Opening OpenRouter…";
+    }
+    if(status){
+      status.classList.remove("error");
+      status.textContent="";
+    }
+
+    try{
+      await api.signInDefault();
+    }catch(error){
+      resetOpenRouterButton();
+      if(status){
+        status.textContent=friendlyAuthError(error);
+        status.classList.add("error");
+      }else{
+        showToast(friendlyAuthError(error),true);
+      }
+    }
+  }
+
+  // Compatibility alias for old callers.
+  function showGoogleLogin(){ return showOpenRouterLogin(); }
 
   function friendlyAuthError(error){
-    const code=String(error?.code||"");
-    if(code.includes("popup-closed"))return "Google login was closed.";
-    if(code.includes("popup-blocked"))return "Safari blocked the login popup. Allow pop-ups for this site and try again.";
-    if(code.includes("unauthorized-domain"))return "Add this GitHub Pages domain to Firebase Authorized domains.";
-    if(code.includes("operation-not-allowed"))return "Enable Google sign-in in Firebase Authentication.";
-    return String(error?.message||error||"Google login failed.");
+    const raw=String(error?.message||error||"");
+    if(/cancel/i.test(raw)) return "OpenRouter authorization was cancelled.";
+    if(/expired/i.test(raw)) return "OpenRouter login expired. Try again.";
+    if(/timeout|AbortError|LOGIN_TIMEOUT/i.test(raw)) return "OpenRouter took too long to respond. Try again.";
+    return "OpenRouter login is temporarily unavailable. Try again or continue as guest.";
   }
 
   function showSetupChoice(){
@@ -810,7 +810,7 @@
     const username=loggedIn?(accountState.profile?.username||"User"):"Guest";
     els.profileAvatar.src=loggedIn?profileAvatarSrc():DEFAULT_USER_AVATAR;
     els.profileUsernameButton.textContent=`@${username}`;
-    els.profileAccountType.textContent=loggedIn?"Google account":"Guest";
+    els.profileAccountType.textContent=loggedIn?"OpenRouter account":"Guest";
     els.accountActionButton.textContent=loggedIn?"Sign out":"Log in";
     els.profileAvatarButton.classList.toggle("profile-locked",!loggedIn);
     els.profileUsernameButton.classList.toggle("profile-locked",!loggedIn);
@@ -867,5 +867,5 @@
 
   function showApiLogin(){ showWelcomeGate(); }
 
-  window.FortniteAgent={searchDatabase,showApiLogin,showGoogleLogin,showToast};
+  window.FortniteAgent={searchDatabase,showApiLogin,showOpenRouterLogin,showGoogleLogin,showToast};
 })();
