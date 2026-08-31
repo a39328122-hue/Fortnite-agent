@@ -24,54 +24,6 @@
 }
 .settings-content > *{flex-shrink:0}
 
-/* Logged-in API gate. */
-.fnaa-api-gate{
-  position:fixed;
-  z-index:2147483647;
-  inset:0;
-  display:grid;
-  place-items:center;
-  padding:18px;
-  background:rgba(0,0,0,.92);
-  backdrop-filter:blur(12px);
-  -webkit-backdrop-filter:blur(12px)
-}
-.fnaa-api-gate[hidden]{display:none !important}
-.fnaa-api-gate-card{
-  width:min(390px,100%);
-  padding:20px;
-  border:1px solid var(--line,#2d2d2d);
-  border-radius:19px;
-  background:var(--panel,#101010);
-  color:var(--text,#f5f5f5);
-  box-shadow:0 24px 80px rgba(0,0,0,.42)
-}
-.fnaa-api-gate-card h1{margin:0 0 7px;font-size:24px}
-.fnaa-api-gate-card p{margin:0 0 14px;color:var(--muted,#888);font-size:12px;line-height:1.5}
-.fnaa-api-gate-card input,.fnaa-api-settings-input{
-  width:100%;
-  height:46px;
-  padding:0 12px;
-  border:1px solid var(--line,#333);
-  border-radius:12px;
-  outline:0;
-  background:var(--panel2,#171717);
-  color:var(--text,#f4f4f4);
-  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-  font-size:13px
-}
-.fnaa-api-gate-card input:focus,.fnaa-api-settings-input:focus{border-color:#5ca8ff}
-.fnaa-api-help{margin:8px 1px 0;color:var(--muted,#777);font-size:10px;line-height:1.45}
-.fnaa-api-help a{color:#268cff !important;text-decoration:none;font-weight:800}
-.fnaa-api-status{min-height:18px;margin-top:8px;color:var(--muted,#888);font-size:10px;line-height:1.4}
-.fnaa-api-status.error{color:#ff8d8d}
-.fnaa-api-status.success{color:#70d99a}
-.fnaa-api-gate-card .login-primary{margin-top:8px}
-.fnaa-api-settings-card .settings-card-main{width:100%}
-.fnaa-api-settings-card .settings-help{margin-bottom:8px}
-.fnaa-api-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:6px}
-.fnaa-api-actions .tool-button{flex:1 1 120px}
-
 /* Guest always has a visible login action in the website header. */
 .fnaa-guest-login{
   position:absolute;
@@ -272,3 +224,42 @@ html[data-theme="white"] .settings-card-icon,
 html[data-theme="white"] .icon-btn,
 html[data-theme="white"] .sidebar-action,
 html[data-theme="white"] .account-action-button{color:#111!important;-webkit-text-fill-color:#111!important}
+
+
+/* ===== V7.1 OpenRouter-only account flow ===== */
+.openrouter-login-button{
+  min-height:48px;
+  letter-spacing:0;
+}
+.fnaa-api-gate-card .login-primary{
+  min-height:48px;
+}
+
+
+/* ===== V7.2 cross-browser auth ===== */
+.fnaa-login-simple{
+  width:min(390px,100%);
+}
+.fnaa-login-provider-note{
+  margin:0 0 14px!important;
+}
+.openrouter-login-button{
+  min-height:50px!important;
+  touch-action:manipulation;
+}
+.fnaa-login-status{
+  min-height:18px;
+  margin:8px 2px 0;
+  color:var(--muted,#8d8d8d);
+  font-size:11px;
+  line-height:1.45;
+}
+.fnaa-login-status.error{
+  color:#ff9b9b;
+}
+@media (pointer:coarse){
+  .openrouter-login-button,
+  .login-link-button{
+    touch-action:manipulation;
+  }
+}
