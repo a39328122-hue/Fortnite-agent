@@ -1,12 +1,14 @@
 (() => {
   "use strict";
 
-  const VERSION = "6.3";
+  const VERSION = "7.0";
   const CURRENT_FN_VERSION = "42.00";
   const API_ENDPOINT = String(window.FORTNITE_AI_API_ENDPOINT || "").trim().replace(/\/+$/, "");
   const LOGIN_MODE_KEY = "fortniteAiAgent.loginMode.session";
   const GUEST_ID_KEY = "fortniteAiAgent.guestId.v6";
-  const GUEST_NEXT_AT = "fortniteAiAgent.guestNextAt.v63";
+  const GUEST_NEXT_AT = "fortniteAiAgent.guestNextAt.v7";
+  const OR_PKCE_VERIFIER = "fortniteAiAgent.openrouter.pkceVerifier.v7";
+  const OR_OAUTH_STARTED = "fortniteAiAgent.openrouter.oauthStartedAt.v7";
   const GUEST_SLOWMODE_MS = 15000;
   let guestSlowmodeTimer = null;
   const originalFetch = window.fetch.bind(window);
@@ -172,12 +174,12 @@
           method: "GET",
           mode: "cors",
           cache: "no-store",
-          headers: { "Authorization": `Bearer ${token}`, "X-FNAA-Client": "web-v2" }
+          headers: { "Authorization": `Bearer ${token}`, "X-FNAA-Client": "web-v3" }
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || `API status failed (${response.status}).`);
         apiVaultCheckedAt = Date.now();
-        setApiVaultState(data.connected === true ? "connected" : "missing", data.updatedAt || null);
+        setApiVaultState(data.connected === true && data.provider === "openrouter" ? "connected" : "missing", data.updatedAt || null);
         return data.connected === true;
       } catch (error) {
         apiVaultCheckedAt = Date.now();
@@ -247,134 +249,168 @@
     if (banner && loggedIn) banner.hidden = true;
   }
 
+  function copyText(en, fr, ar) {
+    const lang = window.FortniteI18n?.getLanguage?.() || "en";
+    return lang === "ar" ? ar : lang === "fr" ? fr : en;
+  }
+
+  function base64Url(bytes) {
+    let raw = "";
+    for (const b of bytes) raw += String.fromCharCode(b);
+    return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  }
+
+  function randomVerifier() {
+    const bytes = crypto.getRandomValues(new Uint8Array(48));
+    return base64Url(bytes);
+  }
+
+  async function pkceChallenge(verifier) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
+    return base64Url(new Uint8Array(digest));
+  }
+
+  function oauthCallbackUrl() {
+    return `${location.origin}${location.pathname}`;
+  }
+
+  async function startOpenRouterConnect() {
+    if (!getPublicAuthState()?.user) {
+      showToast(copyText("Log in with Google first.", "Connecte-toi d’abord avec Google.", "سجّل دخول بـ Google أولاً."), true);
+      return;
+    }
+    const verifier = randomVerifier();
+    const challenge = await pkceChallenge(verifier);
+    sessionStorage.setItem(OR_PKCE_VERIFIER, verifier);
+    sessionStorage.setItem(OR_OAUTH_STARTED, String(Date.now()));
+    const auth = new URL("https://openrouter.ai/auth");
+    auth.searchParams.set("callback_url", oauthCallbackUrl());
+    auth.searchParams.set("code_challenge", challenge);
+    auth.searchParams.set("code_challenge_method", "S256");
+    location.assign(auth.toString());
+  }
+
+  function clearOauthQuery() {
+    const url = new URL(location.href);
+    url.searchParams.delete("code");
+    url.searchParams.delete("error");
+    url.searchParams.delete("error_description");
+    history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+
+  async function finishOpenRouterCallback() {
+    const url = new URL(location.href);
+    const code = String(url.searchParams.get("code") || "").trim();
+    if (!code) return false;
+    const verifier = String(sessionStorage.getItem(OR_PKCE_VERIFIER) || "");
+    const started = Number(sessionStorage.getItem(OR_OAUTH_STARTED) || 0);
+    if (!verifier || verifier.length < 43 || Date.now() - started > 12 * 60 * 1000) {
+      sessionStorage.removeItem(OR_PKCE_VERIFIER);
+      sessionStorage.removeItem(OR_OAUTH_STARTED);
+      clearOauthQuery();
+      showToast(copyText("OpenRouter login expired. Try again.", "La connexion OpenRouter a expiré. Réessaie.", "انتهت محاولة OpenRouter. جرّب مرة ثانية."), true);
+      return false;
+    }
+    const { token } = await getFirebaseUserAndToken(true);
+    if (!token) return false;
+    const gate = ensureApiGate();
+    const status = gate.querySelector("#fnaaApiGateStatus");
+    const connect = gate.querySelector("#fnaaApiGateConnect");
+    gate.hidden = false;
+    if (connect) connect.disabled = true;
+    if (status) {
+      status.className = "fnaa-api-status";
+      status.textContent = copyText("Connecting OpenRouter...", "Connexion à OpenRouter...", "جاري ربط OpenRouter...");
+    }
+    try {
+      const response = await originalFetch(`${API_ENDPOINT}/openrouter/exchange`, {
+        method: "POST", mode: "cors", cache: "no-store",
+        headers: { "Authorization": `Bearer ${token}`, "X-FNAA-Client": "web-v3", "Content-Type": "application/json" },
+        body: JSON.stringify({ code, codeVerifier: verifier })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.connected !== true) throw new Error(data.error || "OpenRouter connection failed.");
+      sessionStorage.removeItem(OR_PKCE_VERIFIER);
+      sessionStorage.removeItem(OR_OAUTH_STARTED);
+      clearOauthQuery();
+      apiVaultCheckedAt = Date.now();
+      setApiVaultState("connected", data.updatedAt || Date.now());
+      document.documentElement.classList.remove("fnaa-api-required");
+      gate.hidden = true;
+      const oldGate = document.getElementById("loginGate");
+      if (oldGate) oldGate.hidden = true;
+      showToast(copyText("OpenRouter connected", "OpenRouter connecté", "تم ربط OpenRouter"));
+      return true;
+    } catch (error) {
+      clearOauthQuery();
+      setApiVaultState("missing");
+      if (status) {
+        status.classList.add("error");
+        status.textContent = String(error?.message || error || "OpenRouter connection failed.");
+      }
+      return false;
+    } finally {
+      if (connect) connect.disabled = false;
+    }
+  }
+
   function ensureApiGate() {
     let gate = document.getElementById("fnaaApiGate");
     if (gate) return gate;
-
     gate = document.createElement("section");
     gate.id = "fnaaApiGate";
     gate.className = "fnaa-api-gate";
     gate.hidden = true;
-
     const card = document.createElement("div");
     card.className = "fnaa-api-gate-card";
-
     const title = document.createElement("h1");
-    title.textContent = "Add API";
-
+    title.textContent = copyText("Connect OpenRouter", "Connecter OpenRouter", "ربط OpenRouter");
     const note = document.createElement("p");
-    note.textContent = "Connect your Groq API once. FNAA encrypts it and keeps it on your account.";
-
-    const input = document.createElement("input");
-    input.id = "fnaaApiGateInput";
-    input.type = "password";
-    input.placeholder = "Type your api";
-    input.autocomplete = "off";
-    input.spellcheck = false;
-    input.maxLength = 300;
-
-    const help = document.createElement("div");
-    help.className = "fnaa-api-help";
-    help.append(document.createTextNode("you dont have api ? get free api from "));
-    const link = document.createElement("a");
-    link.href = "https://console.groq.com/keys";
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = "Groq Api";
-    help.appendChild(link);
-
+    note.textContent = copyText(
+      "One authorization, then FNAA is ready. No API key copy/paste.",
+      "Une autorisation, puis FNAA est prêt. Aucun copier/coller de clé API.",
+      "موافقة وحدة وبعدها FNAA يصير جاهز. بدون نسخ ولصق API key."
+    );
     const status = document.createElement("div");
     status.id = "fnaaApiGateStatus";
     status.className = "fnaa-api-status";
-
     const button = document.createElement("button");
-    button.id = "fnaaApiGateSave";
+    button.id = "fnaaApiGateConnect";
     button.type = "button";
-    button.textContent = "Add API";
     button.className = "login-primary";
-    button.addEventListener("click", () => validateAndSaveApi(input, button, status, true));
-
-    card.append(title, note, input, help, status, button);
+    button.textContent = copyText("Continue with OpenRouter", "Continuer avec OpenRouter", "المتابعة عبر OpenRouter");
+    button.addEventListener("click", () => startOpenRouterConnect().catch((e) => showToast(String(e?.message || e), true)));
+    const guest = document.createElement("button");
+    guest.type = "button";
+    guest.className = "login-secondary";
+    guest.textContent = copyText("Sign out", "Se déconnecter", "تسجيل الخروج");
+    guest.addEventListener("click", () => window.FortniteAuth?.signOut?.());
+    card.append(title, note, status, button, guest);
     gate.appendChild(card);
     document.body.appendChild(gate);
     return gate;
   }
 
-  async function validateAndSaveApi(input, button, status, closeAfter) {
-    const key = String(input?.value || "").trim();
-    if (key.length < 20) {
-      status.textContent = "Type a valid Groq API key.";
-      status.classList.add("error");
-      return false;
-    }
-
-    button.disabled = true;
-    status.classList.remove("error", "success");
-    status.textContent = "Checking & encrypting API...";
-
-    try {
-      const { token } = await getFirebaseUserAndToken(true);
-      if (!token) throw new Error("Your Google login expired. Log in again.");
-
-      const response = await originalFetch(`${API_ENDPOINT}/api/validate`, {
-        method: "POST",
-        mode: "cors",
-        cache: "no-store",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "X-FNAA-Client": "web-v2",
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ apiKey: key })
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || data.valid !== true || data.stored !== true) {
-        throw new Error(data.error || "API validation failed.");
-      }
-
-      input.value = "";
-      apiVaultCheckedAt = Date.now();
-      setApiVaultState("connected", Date.now());
-      status.textContent = "API encrypted & saved.";
-      status.classList.add("success");
-      document.documentElement.classList.remove("fnaa-api-required");
-
-      const state = getPublicAuthState();
-      if (state?.profile?.setupComplete === false) {
-        try { await window.FortniteAuth?.skipSetup?.(); } catch {}
-      }
-
-      if (closeAfter) {
-        setTimeout(() => {
-          const gate = ensureApiGate();
-          gate.hidden = true;
-          const oldGate = document.getElementById("loginGate");
-          if (oldGate) oldGate.hidden = true;
-        }, 350);
-      }
-
-      syncSettingsApiCard();
-      showToast("API encrypted & saved");
-      return true;
-    } catch (error) {
-      setApiVaultState("missing");
-      status.textContent = String(error?.message || error || "API validation failed.");
-      status.classList.add("error");
-      document.documentElement.classList.add("fnaa-api-required");
-      return false;
-    } finally {
-      button.disabled = false;
-    }
-  }
-
   function showApiGate() {
     const gate = ensureApiGate();
-    const input = gate.querySelector("#fnaaApiGateInput");
     const status = gate.querySelector("#fnaaApiGateStatus");
     if (status) { status.textContent = ""; status.className = "fnaa-api-status"; }
     gate.hidden = false;
     document.documentElement.classList.add("fnaa-api-required");
-    setTimeout(() => input?.focus(), 40);
+  }
+
+  async function disconnectOpenRouter() {
+    const { token } = await getFirebaseUserAndToken(true);
+    if (!token) throw new Error("Your Google login expired. Log in again.");
+    const response = await originalFetch(`${API_ENDPOINT}/api/remove`, {
+      method: "POST", mode: "cors", cache: "no-store",
+      headers: { "Authorization": `Bearer ${token}`, "X-FNAA-Client": "web-v3", "Content-Type": "application/json" },
+      body: "{}"
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.removed !== true) throw new Error(data.error || "Couldn't disconnect OpenRouter.");
+    setApiVaultState("missing");
+    showApiGate();
   }
 
   function ensureSettingsApiCard() {
@@ -382,96 +418,41 @@
     if (card) return card;
     const content = document.querySelector(".settings-content");
     if (!content) return null;
-
     card = document.createElement("section");
     card.id = "fnaaSettingsApiCard";
     card.className = "settings-card settings-stack-card fnaa-api-settings-card";
-
     const icon = document.createElement("div");
     icon.className = "settings-card-icon";
-    icon.textContent = "API";
-
+    icon.textContent = "🔒";
     const main = document.createElement("div");
     main.className = "settings-card-main";
-
     const title = document.createElement("h2");
-    title.textContent = "Groq API";
-
+    title.textContent = copyText("Security & Privacy", "Sécurité et confidentialité", "الأمان والخصوصية");
     const state = document.createElement("p");
     state.id = "fnaaSettingsApiState";
-
-    const input = document.createElement("input");
-    input.id = "fnaaSettingsApiInput";
-    input.className = "fnaa-api-settings-input";
-    input.type = "password";
-    input.placeholder = "Type your api";
-    input.autocomplete = "off";
-    input.spellcheck = false;
-    input.maxLength = 300;
-
-    const help = document.createElement("div");
-    help.className = "fnaa-api-help settings-help";
-    help.append(document.createTextNode("you dont have api ? get free api from "));
-    const link = document.createElement("a");
-    link.href = "https://console.groq.com/keys";
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.textContent = "Groq Api";
-    help.appendChild(link);
-
-    const status = document.createElement("div");
-    status.id = "fnaaSettingsApiStatus";
-    status.className = "fnaa-api-status";
-
     const actions = document.createElement("div");
     actions.className = "fnaa-api-actions";
-
-    const save = document.createElement("button");
-    save.id = "fnaaSettingsApiSave";
-    save.type = "button";
-    save.className = "tool-button primary";
-    save.textContent = "Add API";
-    save.addEventListener("click", () => validateAndSaveApi(input, save, status, false));
-
+    const change = document.createElement("button");
+    change.id = "fnaaSettingsApiSave";
+    change.type = "button";
+    change.className = "tool-button primary";
+    change.addEventListener("click", () => startOpenRouterConnect().catch((e) => showToast(String(e?.message || e), true)));
     const remove = document.createElement("button");
     remove.id = "fnaaSettingsApiRemove";
     remove.type = "button";
     remove.className = "tool-button";
-    remove.textContent = "Remove";
+    remove.textContent = copyText("Disconnect", "Déconnecter", "قطع الربط");
     remove.addEventListener("click", async () => {
       remove.disabled = true;
-      status.className = "fnaa-api-status";
-      status.textContent = "Removing API...";
-      try {
-        const { token } = await getFirebaseUserAndToken(true);
-        if (!token) throw new Error("Your Google login expired. Log in again.");
-        const response = await originalFetch(`${API_ENDPOINT}/api/remove`, {
-          method: "POST",
-          mode: "cors",
-          cache: "no-store",
-          headers: { "Authorization": `Bearer ${token}`, "X-FNAA-Client": "web-v2", "Content-Type": "application/json" },
-          body: "{}"
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok || data.removed !== true) throw new Error(data.error || "Couldn't remove API.");
-        setApiVaultState("missing");
-        status.textContent = "API removed.";
-        showApiGate();
-      } catch (error) {
-        status.textContent = String(error?.message || error || "Couldn't remove API.");
-        status.classList.add("error");
-      } finally {
-        syncSettingsApiCard();
-      }
+      try { await disconnectOpenRouter(); showToast(copyText("OpenRouter disconnected", "OpenRouter déconnecté", "تم قطع OpenRouter")); }
+      catch (e) { showToast(String(e?.message || e), true); }
+      finally { syncSettingsApiCard(); }
     });
-
-    actions.append(save, remove);
-    main.append(title, state, input, help, status, actions);
+    actions.append(change, remove);
+    main.append(title, state, actions);
     card.append(icon, main);
-
     const owner = content.querySelector(".owner-settings-card");
-    if (owner) content.insertBefore(card, owner);
-    else content.appendChild(card);
+    if (owner) content.insertBefore(card, owner); else content.appendChild(card);
     return card;
   }
 
@@ -481,32 +462,29 @@
     const loggedIn = !!getPublicAuthState()?.user;
     const connected = apiIsConnected();
     const state = card.querySelector("#fnaaSettingsApiState");
-    const input = card.querySelector("#fnaaSettingsApiInput");
-    const save = card.querySelector("#fnaaSettingsApiSave");
+    const change = card.querySelector("#fnaaSettingsApiSave");
     const remove = card.querySelector("#fnaaSettingsApiRemove");
-
     if (!loggedIn) {
-      state.textContent = "Guest mode uses FNAA shared API + 15s slowmode.";
-      input.disabled = true;
-      save.disabled = true;
+      state.textContent = copyText("Guest uses FNAA's Groq access + 15s slow mode.", "L’invité utilise Groq de FNAA + mode lent 15 s.", "الضيف يستخدم Groq مال FNAA + سلو مود 15 ثانية.");
+      change.textContent = copyText("Log in first", "Se connecter d’abord", "سجّل دخول أولاً");
+      change.disabled = true;
       remove.disabled = true;
       return;
     }
-
+    change.disabled = apiVaultState === "checking";
     if (apiVaultState === "checking" || apiVaultState === "unknown") {
-      state.textContent = "Checking encrypted API...";
+      state.textContent = copyText("Checking OpenRouter...", "Vérification d’OpenRouter...", "جاري التحقق من OpenRouter...");
     } else if (connected) {
-      state.textContent = "Encrypted & saved to your FNAA account.";
+      state.textContent = copyText("OpenRouter connected securely.", "OpenRouter est connecté en toute sécurité.", "OpenRouter مربوط بأمان.");
     } else if (apiVaultState === "error") {
-      state.textContent = "Couldn't check encrypted API right now.";
+      state.textContent = copyText("Couldn't check OpenRouter right now.", "Impossible de vérifier OpenRouter maintenant.", "ما كدرنا نتحقق من OpenRouter هسه.");
     } else {
-      state.textContent = "Required for logged-in AI chat.";
+      state.textContent = copyText("Connect OpenRouter to use the full account AI.", "Connecte OpenRouter pour utiliser l’IA du compte.", "اربط OpenRouter حتى تستخدم AI الحساب الكامل.");
     }
-
-    input.disabled = false;
-    save.disabled = false;
+    change.textContent = connected
+      ? copyText("Change OpenRouter account", "Changer de compte OpenRouter", "تغيير حساب OpenRouter")
+      : copyText("Connect OpenRouter", "Connecter OpenRouter", "ربط OpenRouter");
     remove.disabled = !connected;
-    save.textContent = connected ? "Update API" : "Add API";
   }
 
   function ensureDbWorker() {
@@ -642,16 +620,15 @@
       } catch {}
     }
 
-    // Start guest slow mode only when an actual request is sent to the AI backend.
-    // Local database commands and the separate Tools UI do not trigger it.
-    if (!loggedIn) startGuestSlowmode();
-
     const response = await originalFetch(input, { ...init, headers, body: bodyText });
+
+    // Guest slow mode starts only AFTER FNAA has completed a successful AI reply.
+    if (!loggedIn && response.ok) startGuestSlowmode();
 
     if (loggedIn && (response.status === 428 || response.status === 401)) {
       try {
         const errorData = await response.clone().json();
-        if (errorData?.code === "API_REQUIRED" || errorData?.code === "API_INVALID") {
+        if (errorData?.code === "OPENROUTER_REQUIRED" || errorData?.code === "OPENROUTER_INVALID") {
           setApiVaultState("missing");
           queueMicrotask(showApiGate);
         }
@@ -668,6 +645,18 @@
 
     return response;
   };
+
+  function isMobileComposerDevice() {
+    return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || "") || window.matchMedia?.("(pointer: coarse)")?.matches === true;
+  }
+
+  // Mobile Enter means newline. Only the visible Send button sends on touch/mobile.
+  document.addEventListener("keydown", (event) => {
+    if (event.target?.id !== "messageInput" || event.key !== "Enter" || event.isComposing) return;
+    if (!isMobileComposerDevice()) return;
+    event.stopImmediatePropagation();
+    // Intentionally do NOT preventDefault(): the textarea keeps the native newline.
+  }, true);
 
   document.addEventListener("submit", (event) => {
     if (event.target?.id !== "composer") return;
@@ -733,7 +722,11 @@
     syncAuthoritativeLoginState(detail);
 
     if (detail.user) {
-      handleLoggedInApiState(detail);
+      if (new URL(location.href).searchParams.has("code")) {
+        finishOpenRouterCallback().then((done) => { if (!done) handleLoggedInApiState(detail); });
+      } else {
+        handleLoggedInApiState(detail);
+      }
     } else {
       ensureApiGate().hidden = true;
       document.documentElement.classList.remove("fnaa-api-required");
@@ -759,6 +752,9 @@
   ensureSettingsApiCard();
   ensureGuestLoginButton();
   syncAuthoritativeLoginState();
-  if (getPublicAuthState()?.user) handleLoggedInApiState(getPublicAuthState());
+  if (getPublicAuthState()?.user) {
+    if (new URL(location.href).searchParams.has("code")) finishOpenRouterCallback().then((done) => { if (!done) handleLoggedInApiState(getPublicAuthState()); });
+    else handleLoggedInApiState(getPublicAuthState());
+  }
   console.info(`FNAA Production ${VERSION} loaded.`);
 })();
