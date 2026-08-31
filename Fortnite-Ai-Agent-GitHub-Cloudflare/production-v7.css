@@ -265,3 +265,38 @@ html[data-theme="white"] .account-action-button{color:#111!important;-webkit-tex
 }
 
 /* V7.3: stateless OpenRouter auth; no Durable Object dependency. */
+
+
+/* V7.4.1 masked links: #Label#(https://...) */
+.assistant-content a.fnaa-masked-link{
+  color:#4da3ff!important;
+  -webkit-text-fill-color:#4da3ff!important;
+  text-decoration:none;
+  font-weight:650;
+}
+.assistant-content a.fnaa-masked-link:hover,
+.assistant-content a.fnaa-masked-link:focus-visible{
+  text-decoration:underline;
+}
+html[data-theme="white"] .assistant-content a.fnaa-masked-link{
+  color:#1769d2!important;
+  -webkit-text-fill-color:#1769d2!important;
+}
+
+
+/* ===== FNAA V7.4.2 command menu cleanup ===== */
+.plugin-panel-header .plugin-panel-badge{
+  letter-spacing:.04em;
+}
+.plugin-option .plugin-icon{
+  min-width:38px;
+  text-align:center;
+}
+.plugin-option .plugin-title{
+  overflow-wrap:anywhere;
+}
+
+/* Masked link syntax: #Label#(https://...) */
+.assistant-content a.fnaa-masked-link{
+  cursor:pointer;
+}
