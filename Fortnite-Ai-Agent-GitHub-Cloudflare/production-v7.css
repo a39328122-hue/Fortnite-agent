@@ -300,3 +300,27 @@ html[data-theme="white"] .assistant-content a.fnaa-masked-link{
 .assistant-content a.fnaa-masked-link{
   cursor:pointer;
 }
+
+
+/* ===== FNAA V7.5 — StaticMesh 2D generated preview ===== */
+.mesh-image-stage{
+  position:relative;
+  min-height:220px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  overflow:hidden;
+}
+.mesh-preview-image.generated-staticmesh-preview{
+  width:min(100%,640px);
+  max-height:62vh;
+  object-fit:contain;
+  image-rendering:auto;
+  border-radius:12px;
+}
+.mesh-image-status{white-space:pre-line;text-align:center;line-height:1.45}
+.mesh-image-meta{overflow-wrap:anywhere;word-break:break-word;opacity:.78}
+@media (max-width:600px){
+  .mesh-image-stage{min-height:190px}
+  .mesh-preview-image.generated-staticmesh-preview{width:100%;max-height:52vh}
+}
