@@ -1,14 +1,12 @@
 (() => {
   "use strict";
 
-  const VERSION = "7.0.1";
+  const VERSION = "7.2";
   const CURRENT_FN_VERSION = "42.00";
   const API_ENDPOINT = String(window.FORTNITE_AI_API_ENDPOINT || "").trim().replace(/\/+$/, "");
   const LOGIN_MODE_KEY = "fortniteAiAgent.loginMode.session";
   const GUEST_ID_KEY = "fortniteAiAgent.guestId.v6";
   const GUEST_NEXT_AT = "fortniteAiAgent.guestNextAt.v7";
-  const OR_PKCE_VERIFIER = "fortniteAiAgent.openrouter.pkceVerifier.v7";
-  const OR_OAUTH_STARTED = "fortniteAiAgent.openrouter.oauthStartedAt.v7";
   const GUEST_SLOWMODE_MS = 15000;
   let guestSlowmodeTimer = null;
   const originalFetch = window.fetch.bind(window);
@@ -17,11 +15,6 @@
   let dbWorker = null;
   let dbSeq = 0;
   const dbPending = new Map();
-  let firebaseModulesPromise = null;
-  let apiVaultState = "unknown";
-  let apiVaultUpdatedAt = null;
-  let apiVaultCheckedAt = 0;
-  let apiVaultCheckPromise = null;
 
   function uid() {
     const existing = localStorage.getItem(GUEST_ID_KEY);
@@ -109,102 +102,33 @@
     return window.FortniteAuth?.getState?.() || latestAuthState || {};
   }
 
-  async function getFirebaseUserAndToken(forceRefresh = false) {
-    const publicState = getPublicAuthState();
-    if (!publicState?.user) return { user: null, token: "" };
-
-    try {
-      await Promise.race([
-        window.FORTNITE_AUTH_READY || Promise.resolve(),
-        new Promise((resolve) => setTimeout(resolve, 5000))
-      ]);
-
-      if (!firebaseModulesPromise) {
-        firebaseModulesPromise = Promise.all([
-          import("https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js"),
-          import("https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js")
-        ]);
-      }
-
-      const [appMod, authMod] = await firebaseModulesPromise;
-      const apps = appMod.getApps();
-      if (!apps.length) return { user: null, token: "" };
-      const auth = authMod.getAuth(apps[0]);
-      const user = auth.currentUser;
-      if (!user) return { user: null, token: "" };
-      const token = await user.getIdToken(forceRefresh);
-      return { user, token };
-    } catch (error) {
-      console.warn("FNAA auth token:", error);
-      return { user: null, token: "" };
-    }
+  async function getFirebaseUserAndToken() {
+    const state = getPublicAuthState();
+    return {
+      user: state?.user || null,
+      token: String(window.FortniteAuth?.getSessionToken?.() || "")
+    };
   }
-
 
   function apiIsConnected() {
-    return apiVaultState === "connected";
+    return !!getPublicAuthState()?.user && !!window.FortniteAuth?.getSessionToken?.();
   }
 
-  function setApiVaultState(state, updatedAt = null) {
-    apiVaultState = state;
-    apiVaultUpdatedAt = updatedAt || null;
+  function setApiVaultState() {
     syncSettingsApiCard();
   }
 
-  async function checkStoredApi(force = false) {
-    const state = getPublicAuthState();
-    if (!state?.user) {
-      setApiVaultState("unknown");
-      return false;
-    }
-
-    if (!force && apiVaultCheckPromise) return apiVaultCheckPromise;
-    if (!force && apiVaultState !== "unknown" && Date.now() - apiVaultCheckedAt < 30000) {
-      return apiIsConnected();
-    }
-
-    apiVaultState = "checking";
-    syncSettingsApiCard();
-
-    apiVaultCheckPromise = (async () => {
-      try {
-        const { token } = await getFirebaseUserAndToken(force);
-        if (!token) throw new Error("Your Google login expired. Log in again.");
-        const response = await originalFetch(`${API_ENDPOINT}/api/status`, {
-          method: "GET",
-          mode: "cors",
-          cache: "no-store",
-          headers: { "Authorization": `Bearer ${token}`, "X-FNAA-Client": "web-v3" }
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || `API status failed (${response.status}).`);
-        apiVaultCheckedAt = Date.now();
-        setApiVaultState(data.connected === true && data.provider === "openrouter" ? "connected" : "missing", data.updatedAt || null);
-        return data.connected === true;
-      } catch (error) {
-        apiVaultCheckedAt = Date.now();
-        apiVaultState = "error";
-        syncSettingsApiCard();
-        console.warn("FNAA encrypted API status:", error);
-        return false;
-      } finally {
-        apiVaultCheckPromise = null;
-      }
-    })();
-
-    return apiVaultCheckPromise;
+  async function checkStoredApi() {
+    return apiIsConnected();
   }
 
   function syncAuthoritativeLoginState(detail = null) {
     if (detail) latestAuthState = detail;
     const state = detail || getPublicAuthState();
     if (state?.user) {
-      sessionStorage.setItem(LOGIN_MODE_KEY, "google");
+      sessionStorage.setItem(LOGIN_MODE_KEY, "openrouter");
     } else {
-      if (sessionStorage.getItem(LOGIN_MODE_KEY) === "google") sessionStorage.removeItem(LOGIN_MODE_KEY);
-      apiVaultState = "unknown";
-      apiVaultUpdatedAt = null;
-      apiVaultCheckedAt = 0;
+      if (sessionStorage.getItem(LOGIN_MODE_KEY) === "openrouter") sessionStorage.removeItem(LOGIN_MODE_KEY);
     }
     syncGuestUI();
     syncGuestSlowmodeUI();
@@ -254,163 +178,17 @@
     return lang === "ar" ? ar : lang === "fr" ? fr : en;
   }
 
-  function base64Url(bytes) {
-    let raw = "";
-    for (const b of bytes) raw += String.fromCharCode(b);
-    return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-  }
-
-  function randomVerifier() {
-    const bytes = crypto.getRandomValues(new Uint8Array(48));
-    return base64Url(bytes);
-  }
-
-  async function pkceChallenge(verifier) {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
-    return base64Url(new Uint8Array(digest));
-  }
-
-  function oauthCallbackUrl() {
-    return `${location.origin}${location.pathname}`;
-  }
-
   async function startOpenRouterConnect() {
-    if (!getPublicAuthState()?.user) {
-      showToast(copyText("Log in with Google first.", "Connecte-toi d’abord avec Google.", "سجّل دخول بـ Google أولاً."), true);
-      return;
-    }
-    const verifier = randomVerifier();
-    const challenge = await pkceChallenge(verifier);
-    sessionStorage.setItem(OR_PKCE_VERIFIER, verifier);
-    sessionStorage.setItem(OR_OAUTH_STARTED, String(Date.now()));
-    const auth = new URL("https://openrouter.ai/auth");
-    auth.searchParams.set("callback_url", oauthCallbackUrl());
-    auth.searchParams.set("code_challenge", challenge);
-    auth.searchParams.set("code_challenge_method", "S256");
-    location.assign(auth.toString());
-  }
-
-  function clearOauthQuery() {
-    const url = new URL(location.href);
-    url.searchParams.delete("code");
-    url.searchParams.delete("error");
-    url.searchParams.delete("error_description");
-    history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    return window.FortniteAuth?.signInDefault?.();
   }
 
   async function finishOpenRouterCallback() {
-    const url = new URL(location.href);
-    const code = String(url.searchParams.get("code") || "").trim();
-    if (!code) return false;
-    const verifier = String(sessionStorage.getItem(OR_PKCE_VERIFIER) || "");
-    const started = Number(sessionStorage.getItem(OR_OAUTH_STARTED) || 0);
-    if (!verifier || verifier.length < 43 || Date.now() - started > 12 * 60 * 1000) {
-      sessionStorage.removeItem(OR_PKCE_VERIFIER);
-      sessionStorage.removeItem(OR_OAUTH_STARTED);
-      clearOauthQuery();
-      showToast(copyText("OpenRouter login expired. Try again.", "La connexion OpenRouter a expiré. Réessaie.", "انتهت محاولة OpenRouter. جرّب مرة ثانية."), true);
-      return false;
-    }
-    const { token } = await getFirebaseUserAndToken(true);
-    if (!token) return false;
-    const gate = ensureApiGate();
-    const status = gate.querySelector("#fnaaApiGateStatus");
-    const connect = gate.querySelector("#fnaaApiGateConnect");
-    gate.hidden = false;
-    if (connect) connect.disabled = true;
-    if (status) {
-      status.className = "fnaa-api-status";
-      status.textContent = copyText("Connecting OpenRouter...", "Connexion à OpenRouter...", "جاري ربط OpenRouter...");
-    }
-    try {
-      const response = await originalFetch(`${API_ENDPOINT}/openrouter/exchange`, {
-        method: "POST", mode: "cors", cache: "no-store",
-        headers: { "Authorization": `Bearer ${token}`, "X-FNAA-Client": "web-v3", "Content-Type": "application/json" },
-        body: JSON.stringify({ code, codeVerifier: verifier })
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || data.connected !== true) throw new Error(data.error || "OpenRouter connection failed.");
-      sessionStorage.removeItem(OR_PKCE_VERIFIER);
-      sessionStorage.removeItem(OR_OAUTH_STARTED);
-      clearOauthQuery();
-      apiVaultCheckedAt = Date.now();
-      setApiVaultState("connected", data.updatedAt || Date.now());
-      document.documentElement.classList.remove("fnaa-api-required");
-      gate.hidden = true;
-      const oldGate = document.getElementById("loginGate");
-      if (oldGate) oldGate.hidden = true;
-      showToast(copyText("OpenRouter connected", "OpenRouter connecté", "تم ربط OpenRouter"));
-      return true;
-    } catch (error) {
-      clearOauthQuery();
-      setApiVaultState("missing");
-      if (status) {
-        status.classList.add("error");
-        status.textContent = String(error?.message || error || "OpenRouter connection failed.");
-      }
-      return false;
-    } finally {
-      if (connect) connect.disabled = false;
-    }
-  }
-
-  function ensureApiGate() {
-    let gate = document.getElementById("fnaaApiGate");
-    if (gate) return gate;
-    gate = document.createElement("section");
-    gate.id = "fnaaApiGate";
-    gate.className = "fnaa-api-gate";
-    gate.hidden = true;
-    const card = document.createElement("div");
-    card.className = "fnaa-api-gate-card";
-    const title = document.createElement("h1");
-    title.textContent = copyText("Connect OpenRouter", "Connecter OpenRouter", "ربط OpenRouter");
-    const note = document.createElement("p");
-    note.textContent = copyText(
-      "One authorization, then FNAA is ready. No API key copy/paste.",
-      "Une autorisation, puis FNAA est prêt. Aucun copier/coller de clé API.",
-      "موافقة وحدة وبعدها FNAA يصير جاهز. بدون نسخ ولصق API key."
-    );
-    const status = document.createElement("div");
-    status.id = "fnaaApiGateStatus";
-    status.className = "fnaa-api-status";
-    const button = document.createElement("button");
-    button.id = "fnaaApiGateConnect";
-    button.type = "button";
-    button.className = "login-primary";
-    button.textContent = copyText("Continue with OpenRouter", "Continuer avec OpenRouter", "المتابعة عبر OpenRouter");
-    button.addEventListener("click", () => startOpenRouterConnect().catch((e) => showToast(String(e?.message || e), true)));
-    const guest = document.createElement("button");
-    guest.type = "button";
-    guest.className = "login-secondary";
-    guest.textContent = copyText("Sign out", "Se déconnecter", "تسجيل الخروج");
-    guest.addEventListener("click", () => window.FortniteAuth?.signOut?.());
-    card.append(title, note, status, button, guest);
-    gate.appendChild(card);
-    document.body.appendChild(gate);
-    return gate;
-  }
-
-  function showApiGate() {
-    const gate = ensureApiGate();
-    const status = gate.querySelector("#fnaaApiGateStatus");
-    if (status) { status.textContent = ""; status.className = "fnaa-api-status"; }
-    gate.hidden = false;
-    document.documentElement.classList.add("fnaa-api-required");
+    return false;
   }
 
   async function disconnectOpenRouter() {
-    const { token } = await getFirebaseUserAndToken(true);
-    if (!token) throw new Error("Your Google login expired. Log in again.");
-    const response = await originalFetch(`${API_ENDPOINT}/api/remove`, {
-      method: "POST", mode: "cors", cache: "no-store",
-      headers: { "Authorization": `Bearer ${token}`, "X-FNAA-Client": "web-v3", "Content-Type": "application/json" },
-      body: "{}"
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.removed !== true) throw new Error(data.error || "Couldn't disconnect OpenRouter.");
-    setApiVaultState("missing");
-    showApiGate();
+    await window.FortniteAuth?.signOut?.();
+    ensureApiGate().hidden = true;
   }
 
   function ensureSettingsApiCard() {
@@ -427,7 +205,7 @@
     const main = document.createElement("div");
     main.className = "settings-card-main";
     const title = document.createElement("h2");
-    title.textContent = copyText("Security & Privacy", "Sécurité et confidentialité", "الأمان والخصوصية");
+    title.textContent = copyText("OpenRouter Account", "Compte OpenRouter", "حساب OpenRouter");
     const state = document.createElement("p");
     state.id = "fnaaSettingsApiState";
     const actions = document.createElement("div");
@@ -460,50 +238,29 @@
     const card = ensureSettingsApiCard();
     if (!card) return;
     const loggedIn = !!getPublicAuthState()?.user;
-    const connected = apiIsConnected();
     const state = card.querySelector("#fnaaSettingsApiState");
     const change = card.querySelector("#fnaaSettingsApiSave");
     const remove = card.querySelector("#fnaaSettingsApiRemove");
     if (!loggedIn) {
-      state.textContent = copyText("Guest uses FNAA's Groq access + 15s slow mode.", "L’invité utilise Groq de FNAA + mode lent 15 s.", "الضيف يستخدم Groq مال FNAA + سلو مود 15 ثانية.");
-      change.textContent = copyText("Log in first", "Se connecter d’abord", "سجّل دخول أولاً");
-      change.disabled = true;
-      remove.disabled = true;
+      state.textContent = copyText(
+        "Guest uses FNAA's Groq access + 15s slow mode.",
+        "L’invité utilise Groq de FNAA + mode lent 15 s.",
+        "الضيف يستخدم Groq مال FNAA + سلو مود 15 ثانية."
+      );
+      change.textContent = "Continue with OpenRouter";
+      change.disabled = false;
+      remove.hidden = true;
       return;
     }
-    change.disabled = apiVaultState === "checking";
-    if (apiVaultState === "checking" || apiVaultState === "unknown") {
-      state.textContent = copyText("Checking OpenRouter...", "Vérification d’OpenRouter...", "جاري التحقق من OpenRouter...");
-    } else if (connected) {
-      state.textContent = copyText("OpenRouter connected securely.", "OpenRouter est connecté en toute sécurité.", "OpenRouter مربوط بأمان.");
-    } else if (apiVaultState === "error") {
-      state.textContent = copyText("Couldn't check OpenRouter right now.", "Impossible de vérifier OpenRouter maintenant.", "ما كدرنا نتحقق من OpenRouter هسه.");
-    } else {
-      state.textContent = copyText("Connect OpenRouter to use the full account AI.", "Connecte OpenRouter pour utiliser l’IA du compte.", "اربط OpenRouter حتى تستخدم AI الحساب الكامل.");
-    }
-    change.textContent = connected
-      ? copyText("Change OpenRouter account", "Changer de compte OpenRouter", "تغيير حساب OpenRouter")
-      : copyText("Connect OpenRouter", "Connecter OpenRouter", "ربط OpenRouter");
-    remove.disabled = !connected;
-  }
-
-  function ensureDbWorker() {
-    if (dbWorker) return dbWorker;
-    dbWorker = new Worker("./database-worker.js");
-    dbWorker.addEventListener("message", (event) => {
-      const { id, ok, data, error } = event.data || {};
-      const pending = dbPending.get(id);
-      if (!pending) return;
-      dbPending.delete(id);
-      ok ? pending.resolve(data) : pending.reject(new Error(error || "Database worker error"));
-    });
-    dbWorker.addEventListener("error", (event) => {
-      for (const pending of dbPending.values()) pending.reject(new Error(event.message || "Database worker crashed"));
-      dbPending.clear();
-      dbWorker?.terminate();
-      dbWorker = null;
-    });
-    return dbWorker;
+    state.textContent = copyText(
+      "OpenRouter account connected.",
+      "Compte OpenRouter connecté.",
+      "حساب OpenRouter مربوط."
+    );
+    change.textContent = copyText("Reconnect", "Reconnecter", "إعادة الربط");
+    change.disabled = false;
+    remove.textContent = copyText("Sign out", "Se déconnecter", "تسجيل الخروج");
+    remove.hidden = false;
   }
 
   function dbSearch(scope, query, timeoutMs = 6500) {
@@ -606,7 +363,7 @@
     const state = getPublicAuthState();
     const loggedIn = !!state?.user;
     if (loggedIn) {
-      const { token } = await getFirebaseUserAndToken(false);
+      const token = String(window.FortniteAuth?.getSessionToken?.() || "");
       if (token) headers.set("Authorization", `Bearer ${token}`);
     }
 
@@ -625,14 +382,8 @@
     // Guest slow mode starts only AFTER FNAA has completed a successful AI reply.
     if (!loggedIn && response.ok) startGuestSlowmode();
 
-    if (loggedIn && (response.status === 428 || response.status === 401)) {
-      try {
-        const errorData = await response.clone().json();
-        if (errorData?.code === "OPENROUTER_REQUIRED" || errorData?.code === "OPENROUTER_INVALID") {
-          setApiVaultState("missing");
-          queueMicrotask(showApiGate);
-        }
-      } catch {}
+    if (loggedIn && response.status === 401) {
+      try { await window.FortniteAuth?.refresh?.(); } catch {}
     }
 
     if (!loggedIn && response.status === 429) {
@@ -662,13 +413,6 @@
     if (event.target?.id !== "composer") return;
     const state = getPublicAuthState();
 
-    if (state?.user && !apiIsConnected()) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      showApiGate();
-      if (apiVaultState === "unknown" || apiVaultState === "error") checkStoredApi(true);
-      return;
-    }
 
     if (!state?.user) {
       const input = document.getElementById("messageInput");
@@ -698,55 +442,26 @@
     if (event.key === GUEST_NEXT_AT) syncGuestSlowmodeUI();
   });
 
-  async function handleLoggedInApiState(detail) {
-    document.documentElement.classList.add("fnaa-api-required");
-    const connected = await checkStoredApi(true);
+  async function handleLoggedInApiState() {
     if (!getPublicAuthState()?.user) return;
-
-    if (!connected) {
-      showApiGate();
-      return;
-    }
-
     document.documentElement.classList.remove("fnaa-api-required");
-    ensureApiGate().hidden = true;
-    if (detail?.profile?.setupComplete === false) {
-      window.FortniteAuth?.skipSetup?.().catch(() => {});
-    }
-    const oldGate = document.getElementById("loginGate");
-    if (oldGate) oldGate.hidden = true;
+    syncSettingsApiCard();
   }
 
   window.addEventListener("fortnite-auth-changed", (event) => {
     const detail = event.detail || {};
     syncAuthoritativeLoginState(detail);
-
-    if (detail.user) {
-      if (new URL(location.href).searchParams.has("code")) {
-        finishOpenRouterCallback().then((done) => { if (!done) handleLoggedInApiState(detail); });
-      } else {
-        handleLoggedInApiState(detail);
-      }
-    } else {
-      ensureApiGate().hidden = true;
+    if (detail.user) handleLoggedInApiState(detail);
+    else {
       document.documentElement.classList.remove("fnaa-api-required");
     }
   });
 
   window.addEventListener("fortnite-login-mode-changed", syncGuestUI);
-  // V7.0.1: removed the broad subtree MutationObserver.
-  // It watched childList and then rewrote textContent inside its own callback,
-  // which could create a self-triggering microtask loop and freeze Safari/mobile.
-  // Auth/login/settings already sync through explicit FNAA events below/above.
   syncGuestSlowmodeUI();
-
-  ensureApiGate();
   ensureSettingsApiCard();
   ensureGuestLoginButton();
   syncAuthoritativeLoginState();
-  if (getPublicAuthState()?.user) {
-    if (new URL(location.href).searchParams.has("code")) finishOpenRouterCallback().then((done) => { if (!done) handleLoggedInApiState(getPublicAuthState()); });
-    else handleLoggedInApiState(getPublicAuthState());
-  }
+  if (getPublicAuthState()?.user) handleLoggedInApiState(getPublicAuthState());
   console.info(`FNAA Production ${VERSION} loaded.`);
 })();
