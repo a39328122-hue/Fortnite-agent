@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "7.0";
+  const VERSION = "7.0.1";
   const CURRENT_FN_VERSION = "42.00";
   const API_ENDPOINT = String(window.FORTNITE_AI_API_ENDPOINT || "").trim().replace(/\/+$/, "");
   const LOGIN_MODE_KEY = "fortniteAiAgent.loginMode.session";
@@ -600,7 +600,7 @@
 
     const headers = new Headers(input instanceof Request ? input.headers : undefined);
     new Headers(init?.headers || {}).forEach((value, key) => headers.set(key, value));
-    headers.set("X-FNAA-Client", "web-v2");
+    headers.set("X-FNAA-Client", "web-v3");
     headers.set("X-FNAA-Guest-ID", uid());
 
     const state = getPublicAuthState();
@@ -734,18 +734,10 @@
   });
 
   window.addEventListener("fortnite-login-mode-changed", syncGuestUI);
-
-  const observer = new MutationObserver(() => {
-    syncGuestUI();
-    syncSettingsApiCard();
-    const state = getPublicAuthState();
-    if (state?.user && apiIsConnected()) {
-      const oldGate = document.getElementById("loginGate");
-      if (oldGate && oldGate.querySelector("#setupSure,#setupUsername")) oldGate.hidden = true;
-    }
-  });
-
-  observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "data-theme"] });
+  // V7.0.1: removed the broad subtree MutationObserver.
+  // It watched childList and then rewrote textContent inside its own callback,
+  // which could create a self-triggering microtask loop and freeze Safari/mobile.
+  // Auth/login/settings already sync through explicit FNAA events below/above.
   syncGuestSlowmodeUI();
 
   ensureApiGate();
