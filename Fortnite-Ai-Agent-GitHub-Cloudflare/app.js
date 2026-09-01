@@ -2584,15 +2584,14 @@
   // ---------------------------------------------------------------------------
 
   function ensureDbWorker() {
-    if (dbWorker) {
-      return dbWorker;
-    }
+  if (dbWorker) {
+    return dbWorker;
+  }
 
-    dbWorker =
-      new Worker(
-        "./database-worker.js?v=2"
-      );
-
+  dbWorker =
+    new Worker(
+      "/Fortnite-agent/database-worker.js?v=3"
+    );
     dbWorker.addEventListener(
       "message",
       (event) => {
