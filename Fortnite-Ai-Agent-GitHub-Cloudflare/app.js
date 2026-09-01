@@ -1781,6 +1781,30 @@
       skipRoute = false
     } = options;
 
+    // Check the guest gate before changing routes. Description is allowed to
+    // flash "X sec left" inside Tools without unexpectedly jumping to Chat.
+    if (
+      guestSlowmodeBlocks(
+        clean
+      )
+    ) {
+      const seconds =
+        Math.max(
+          1,
+          Math.ceil(
+            guestSlowmodeRemainingMs() /
+            1000
+          )
+        );
+
+      syncGuestSlowmodeUI();
+
+      return {
+        blocked: true,
+        retryAfterSeconds: seconds
+      };
+    }
+
     if (
       !skipRoute &&
       currentRoute() !==
@@ -1982,9 +2006,15 @@
 
     if (
       context.assetContext
+        ?.path
     ) {
-      body.asset_context =
-        context.assetContext;
+      // The Worker deliberately rebuilds NovaSparx evidence server-side.
+      // Never ask it to trust arbitrary browser-supplied inspection JSON.
+      body.asset_context = {
+        path:
+          context.assetContext
+            .path
+      };
     }
 
     const response =
@@ -2074,7 +2104,7 @@
     const visible =
       `Describe this path: ${clean}`;
 
-    await sendTextMessage(
+    return sendTextMessage(
       visible,
       {
         assetPath: clean
@@ -3755,15 +3785,19 @@
           <span>Fortnite Ai Agent</span>
         </h1>
 
-        <p class="fnaa-login-provider-note">
-          Sign in with OpenRouter.
-        </p>
+        <div class="fnaa-login-actions">
+          <button
+            class="login-primary openrouter-login-button"
+            id="loginMain"
+            type="button"
+          >Log in</button>
 
-        <button
-          class="login-primary openrouter-login-button"
-          id="loginMain"
-          type="button"
-        >Continue with OpenRouter</button>
+          <button
+            class="login-secondary openrouter-create-button"
+            id="createAccountMain"
+            type="button"
+          >Create New</button>
+        </div>
 
         <div
           id="openRouterLoginStatus"
@@ -3773,15 +3807,12 @@
         ></div>
 
         <div class="login-inline-text login-guest-line">
-          <span data-i18n="continueAs">
-            Continue as a
-          </span>
+          <span>Account for free or continue as a</span>
 
           <button
             class="login-link-button"
             id="loginGuest"
             type="button"
-            data-i18n="guest"
           >guest</button>
         </div>
       </div>`;
@@ -3794,7 +3825,19 @@
     $("loginMain")
       ?.addEventListener(
         "click",
-        showOpenRouterLogin
+        () =>
+          showOpenRouterLogin(
+            "login"
+          )
+      );
+
+    $("createAccountMain")
+      ?.addEventListener(
+        "click",
+        () =>
+          showOpenRouterLogin(
+            "create"
+          )
       );
 
     $("loginGuest")
@@ -3825,24 +3868,45 @@
   }
 
   function resetOpenRouterButton() {
-    const button =
+    const loginButton =
       $("loginMain");
 
-    if (!button) return;
+    const createButton =
+      $("createAccountMain");
 
-    button.disabled =
-      false;
+    if (loginButton) {
+      loginButton.disabled =
+        false;
 
-    button.textContent =
-      "Continue with OpenRouter";
+      loginButton.textContent =
+        "Log in";
+    }
+
+    if (createButton) {
+      createButton.disabled =
+        false;
+
+      createButton.textContent =
+        "Create New";
+    }
   }
 
-  async function showOpenRouterLogin() {
+  async function showOpenRouterLogin(
+    mode = "login"
+  ) {
     const auth =
       window.FortniteAuth;
 
-    const button =
+    const loginButton =
       $("loginMain");
+
+    const createButton =
+      $("createAccountMain");
+
+    const activeButton =
+      mode === "create"
+        ? createButton
+        : loginButton;
 
     const status =
       $("openRouterLoginStatus");
@@ -3859,11 +3923,19 @@
       return;
     }
 
-    if (button) {
-      button.disabled = true;
+    if (loginButton) {
+      loginButton.disabled = true;
+    }
 
-      button.textContent =
-        "Opening OpenRouter…";
+    if (createButton) {
+      createButton.disabled = true;
+    }
+
+    if (activeButton) {
+      activeButton.textContent =
+        mode === "create"
+          ? "Opening account setup…"
+          : "Opening login…";
     }
 
     if (status) {
@@ -3875,6 +3947,9 @@
     }
 
     try {
+      // OpenRouter's authorization page handles both existing-account login
+      // and creating a new free account. FNAA keeps two clear entry buttons
+      // while using one secure provider flow.
       await auth
         .signInDefault();
     } catch (error) {
@@ -4010,6 +4085,9 @@
         loggedIn;
     }
 
+    const guestBanner =
+      $("guestLoginBanner");
+
     if (
       guestBanner &&
       loggedIn
@@ -4095,7 +4173,9 @@
       ?.addEventListener(
         "click",
         () =>
-          showOpenRouterLogin()
+          showOpenRouterLogin(
+            "login"
+          )
       );
 
     card
@@ -4741,6 +4821,16 @@
 
       getRoute:
         currentRoute,
+
+      getGuestSlowmodeRemainingSeconds:
+        () =>
+          Math.max(
+            0,
+            Math.ceil(
+              guestSlowmodeRemainingMs() /
+              1000
+            )
+          ),
 
       getAccountState:
         () => ({
