@@ -6,11 +6,17 @@ on:
     paths:
       - "Fortnite-Ai-Agent-GitHub-Cloudflare/database/fortnite_assets.gz"
       - "Fortnite-Ai-Agent-GitHub-Cloudflare/database/fortnite_assets_new.gz"
+      - "Fortnite-Ai-Agent-GitHub-Cloudflare/database/fortnite_assets_previous.gz"
       - "Fortnite-Ai-Agent-GitHub-Cloudflare/database/json-src/**"
       - "Fortnite-Ai-Agent-GitHub-Cloudflare/build_database.py"
+      - ".github/workflows/build-database.yml"
 
 permissions:
   contents: write
+
+concurrency:
+  group: fnaa-search-database
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -19,21 +25,38 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Build indexes
+      - name: Build FNAA search indexes
         working-directory: Fortnite-Ai-Agent-GitHub-Cloudflare
+        env:
+          FNAA_FORTNITE_VERSION: "42.00"
         run: python build_database.py
 
       - name: Commit generated indexes
+        shell: bash
         run: |
+          set -euo pipefail
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Fortnite-Ai-Agent-GitHub-Cloudflare/database/index
-          git add Fortnite-Ai-Agent-GitHub-Cloudflare/database/manifest.json
-          git diff --cached --quiet || git commit -m "Build Fortnite search indexes"
-          git push
+
+          git add \
+            Fortnite-Ai-Agent-GitHub-Cloudflare/database/index \
+            Fortnite-Ai-Agent-GitHub-Cloudflare/database/index-v1 \
+            Fortnite-Ai-Agent-GitHub-Cloudflare/database/manifest.json
+
+          if git diff --cached --quiet; then
+            echo "Search indexes are already up to date."
+            exit 0
+          fi
+
+          git commit -m "Build FNAA 1.0 search indexes"
+          git pull --rebase origin main
+          git push origin HEAD:main
