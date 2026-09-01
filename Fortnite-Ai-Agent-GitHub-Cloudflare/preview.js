@@ -200,7 +200,7 @@
         return;
       }
 
-      // 4. Mesh path: use NovaSparx geometry + real material evidence.
+      // 4.Mesh path: use NovaSparx geometry + real material evidence.
       await renderNovaMesh(path, img, status, meta);
     } catch (error) {
       img.hidden = true;
