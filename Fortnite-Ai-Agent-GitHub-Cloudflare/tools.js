@@ -544,7 +544,10 @@
           button.dataset.assetAction;
 
         if (action === "describe") {
-          describePath(path);
+          await describePath(
+            path,
+            button
+          );
           return;
         }
 
@@ -574,18 +577,54 @@
     );
   }
 
-  function describePath(path) {
-    close();
+  async function describePath(
+    path,
+    button
+  ) {
+    const remaining =
+      Number(
+        window.FortniteAgent
+          ?.getGuestSlowmodeRemainingSeconds
+          ?.() || 0
+      );
+
+    if (remaining > 0) {
+      flashDescriptionCooldown(
+        button,
+        remaining
+      );
+
+      return;
+    }
 
     if (
       window.FortniteAgent
         ?.describePath
     ) {
-      window.FortniteAgent
-        .describePath(path);
+      const result =
+        await window.FortniteAgent
+          .describePath(path);
 
+      // Safety for an edge case where the cooldown starts between the button
+      // check and the send attempt. Keep the user in Tools and show the time
+      // on the button rather than pretending a request was sent.
+      if (
+        result?.blocked &&
+        result.retryAfterSeconds > 0
+      ) {
+        flashDescriptionCooldown(
+          button,
+          result.retryAfterSeconds
+        );
+
+        return;
+      }
+
+      close();
       return;
     }
+
+    close();
 
     window.dispatchEvent(
       new CustomEvent(
@@ -595,6 +634,68 @@
         }
       )
     );
+  }
+
+  function flashDescriptionCooldown(
+    button,
+    seconds
+  ) {
+    if (!button) return;
+
+    const safeSeconds =
+      Math.max(
+        1,
+        Math.ceil(
+          Number(seconds) || 0
+        )
+      );
+
+    clearTimeout(
+      Number(
+        button.dataset
+          .descriptionCooldownTimer || 0
+      )
+    );
+
+    button.dataset
+      .descriptionOriginalText =
+      button.dataset
+        .descriptionOriginalText ||
+      button.textContent ||
+      "Description";
+
+    button.textContent =
+      `${safeSeconds} sec left`;
+
+    button.classList.add(
+      "description-cooldown"
+    );
+
+    button.disabled = true;
+
+    const timer =
+      setTimeout(
+        () => {
+          button.disabled = false;
+
+          button.classList.remove(
+            "description-cooldown"
+          );
+
+          button.textContent =
+            button.dataset
+              .descriptionOriginalText ||
+            "Description";
+
+          delete button.dataset
+            .descriptionCooldownTimer;
+        },
+        3000
+      );
+
+    button.dataset
+      .descriptionCooldownTimer =
+      String(timer);
   }
 
   async function previewPath(
