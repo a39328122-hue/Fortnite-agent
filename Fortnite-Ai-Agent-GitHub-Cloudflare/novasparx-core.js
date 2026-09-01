@@ -1,28 +1,26 @@
 (() => {
   "use strict";
 
-  const API_ENDPOINT = String(window.FORTNITE_AI_API_ENDPOINT || "")
-    .trim()
-    .replace(/\/+$/, "");
-
+  const API = String(window.FORTNITE_AI_API_ENDPOINT || "").trim().replace(/\/+$/, "");
   const MAX_VERTICES = 700000;
   const MAX_INDICES = 2100000;
-  const MAX_MATERIALS = 32;
+  const MAX_MATERIALS = 64;
 
-  function cleanPath(input) {
-    let value = String(input || "").trim().replace(/\\/g, "/");
-    if (!value) return "";
+  function fallbackClean(raw) {
+    let value = String(raw || "").trim().replace(/\\/g, "/");
 
-    const classWrap = value.match(
-      /^(?:StaticMesh|SkeletalMesh|Texture2D|Texture|Material|MaterialInstanceConstant|Object|BlueprintGeneratedClass)?'(.+)'$/i
+    const wrapped = value.match(
+      /^(?:StaticMesh|SkeletalMesh|Texture2D|Texture|Material|MaterialInstanceConstant|MaterialInstance|Object|BlueprintGeneratedClass|Blueprint|NiagaraSystem|NiagaraEmitter|SoundCue|SoundWave)?'(.+)'$/i
     );
-    if (classWrap?.[1]) value = classWrap[1];
+    if (wrapped) value = wrapped[1];
 
-    value = value.replace(/^["']|["']$/g, "");
-    value = value.replace(/\.(?:uasset|uexp|ubulk)$/i, "");
+    value = value
+      .replace(/^["']|["']$/g, "")
+      .replace(/\.(?:uasset|uexp|ubulk)$/i, "");
 
     const slash = value.lastIndexOf("/");
     const dot = value.lastIndexOf(".");
+
     if (dot > slash) {
       const left = value.slice(0, dot);
       const objectName = value.slice(dot + 1).replace(/_C$/i, "");
@@ -32,301 +30,275 @@
 
     if (/^FortniteGame\/Content\//i.test(value)) {
       value = "/Game/" + value.slice("FortniteGame/Content/".length);
-    } else {
-      const plugin = value.match(
-        /^(?:FortniteGame\/)?Plugins\/(?:GameFeatures\/)?([^/]+)\/Content\/(.+)$/i
-      );
-      if (plugin) value = `/${plugin[1]}/${plugin[2]}`;
+    } else if (/^Engine\/Content\//i.test(value)) {
+      value = "/Engine/" + value.slice("Engine/Content/".length);
+    } else if (/^(?:FortniteGame\/)?Plugins\//i.test(value)) {
+      const parts = value.split("/").filter(Boolean);
+      const contentIndex = parts.findIndex((part) => part.toLowerCase() === "content");
+      if (contentIndex >= 1 && contentIndex + 1 < parts.length) {
+        const mount = parts[contentIndex - 1];
+        value = `/${mount}/${parts.slice(contentIndex + 1).join("/")}`;
+      }
     }
 
     if (!value.startsWith("/") && value.includes("/")) value = "/" + value;
-    return value.replace(/\/{2,}/g, "/");
+    return value.replace(/\/{2,}/g, "/").replace(/\/$/, "");
   }
 
-  function objectPath(input) {
-    const clean = cleanPath(input);
-    if (!clean) return "";
-    const name = clean.split("/").pop();
-    return `${clean}.${name}`;
+  function cleanPath(raw) {
+    return window.FortniteTools?.packagePath?.(raw) || fallbackClean(raw);
   }
 
-  function filesystemPath(input) {
-    const clean = cleanPath(input);
-    if (!clean) return "";
+  function objectPath(raw) {
+    const packagePath = cleanPath(raw);
+    if (!packagePath) return "";
+    const name = packagePath.slice(packagePath.lastIndexOf("/") + 1);
+    return `${packagePath}.${name}`;
+  }
 
-    if (clean.startsWith("/Game/")) {
-      return `FortniteGame/Content/${clean.slice(6)}.uasset`;
+  function textureUrl(path) {
+    const value = String(path || "").trim();
+    if (!value || !API) return "";
+    return `${API}/nova/texture?path=${encodeURIComponent(value)}`;
+  }
+
+  function clamp(value, min, max, fallback) {
+    value = Number(value);
+    return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+  }
+
+  function rgba(value, fallback) {
+    if (Array.isArray(value)) {
+      return [0, 1, 2, 3].map((index) => {
+        const number = Number(value[index]);
+        return Number.isFinite(number) ? number : fallback[index];
+      });
     }
 
-    const parts = clean.replace(/^\//, "").split("/");
-    if (parts.length > 1) {
-      return `FortniteGame/Plugins/GameFeatures/${parts[0]}/Content/${parts.slice(1).join("/")}.uasset`;
+    if (value && typeof value === "object") {
+      return [
+        Number(value.r ?? value.R ?? value.x ?? value.X ?? fallback[0]),
+        Number(value.g ?? value.G ?? value.y ?? value.Y ?? fallback[1]),
+        Number(value.b ?? value.B ?? value.z ?? value.Z ?? fallback[2]),
+        Number(value.a ?? value.A ?? value.w ?? value.W ?? fallback[3])
+      ].map((number, index) => Number.isFinite(number) ? number : fallback[index]);
     }
 
-    return clean + ".uasset";
+    return fallback.slice();
   }
 
-  function aliases(input) {
-    const out = [];
-    const seen = new Set();
-
-    const add = (value) => {
-      value = String(value || "").trim();
-      if (!value) return;
-      const key = value.toLowerCase();
-      if (seen.has(key)) return;
-      seen.add(key);
-      out.push(value);
-    };
-
-    const clean = cleanPath(input);
-    add(input);
-    add(clean);
-    add(objectPath(clean));
-    add(filesystemPath(clean));
-
-    if (clean) {
-      add(`StaticMesh'${objectPath(clean)}'`);
-      add(`Object'${objectPath(clean)}'`);
-    }
-
-    return out.slice(0, 12);
-  }
-
-  function finiteArray(raw, itemSize, maxItems) {
+  function finiteArray(raw, tupleSize, maxItems) {
     if (!Array.isArray(raw) && !ArrayBuffer.isView(raw)) return null;
-    const arr = ArrayBuffer.isView(raw) ? Array.from(raw) : raw;
-    if (!arr.length || arr.length % itemSize !== 0) return null;
+    const input = ArrayBuffer.isView(raw) ? Array.from(raw) : raw;
+    if (!input.length) return null;
 
     const out = [];
-    const limit = Math.min(arr.length, maxItems * itemSize);
 
-    if (typeof arr[0] === "number") {
+    if (typeof input[0] === "number") {
+      const limit = Math.min(input.length, maxItems * tupleSize);
       for (let i = 0; i < limit; i++) {
-        const n = Number(arr[i]);
-        if (!Number.isFinite(n)) return null;
-        out.push(n);
+        const number = Number(input[i]);
+        if (!Number.isFinite(number)) return null;
+        out.push(number);
       }
-      return out;
+      return out.length % tupleSize === 0 ? out : null;
     }
 
-    const names =
-      itemSize === 2 ? [["x","X","u","U"],["y","Y","v","V"]] :
-      itemSize === 4 ? [["x","X","r","R"],["y","Y","g","G"],["z","Z","b","B"],["w","W","a","A"]] :
-      [["x","X"],["y","Y"],["z","Z"]];
+    const keys = tupleSize === 2
+      ? [["x", "X", "u", "U"], ["y", "Y", "v", "V"]]
+      : tupleSize === 4
+        ? [["x", "X", "r", "R"], ["y", "Y", "g", "G"], ["z", "Z", "b", "B"], ["w", "W", "a", "A"]]
+        : [["x", "X"], ["y", "Y"], ["z", "Z"]];
 
-    for (const item of arr) {
+    for (const item of input) {
       if (!item || typeof item !== "object") return null;
-      for (let c = 0; c < itemSize; c++) {
-        let value;
-        if (Array.isArray(item)) value = item[c];
-        else {
-          for (const name of names[c]) {
-            if (item[name] !== undefined) {
-              value = item[name];
+
+      for (let component = 0; component < tupleSize; component++) {
+        let value = Array.isArray(item) ? item[component] : undefined;
+
+        if (!Array.isArray(item)) {
+          for (const key of keys[component]) {
+            if (item[key] !== undefined) {
+              value = item[key];
               break;
             }
           }
         }
-        const n = Number(value);
-        if (!Number.isFinite(n)) return null;
-        out.push(n);
+
+        const number = Number(value);
+        if (!Number.isFinite(number)) return null;
+        out.push(number);
       }
-      if (out.length / itemSize >= maxItems) break;
+
+      if (out.length / tupleSize >= maxItems) break;
     }
 
     return out;
   }
 
-  function normalizeSections(raw, indexCount) {
-    if (!Array.isArray(raw)) return [];
-    const out = [];
+  function normalizeMaterial(raw, index) {
+    const material = raw && typeof raw === "object" ? raw : {};
 
-    for (const item of raw.slice(0, 128)) {
-      if (!item || typeof item !== "object") continue;
-
-      const firstIndex = Math.max(
-        0,
-        Number(item.firstIndex ?? item.FirstIndex ?? item.baseIndex ?? item.BaseIndex ?? 0) || 0
-      );
-
-      let count = Number(
-        item.indexCount ?? item.IndexCount ?? item.numIndices ?? item.NumIndices ?? 0
-      ) || 0;
-
-      if (!count) {
-        const faces = Number(item.numFaces ?? item.NumFaces ?? item.triangleCount ?? item.TriangleCount ?? 0) || 0;
-        count = faces * 3;
+    const pathValue = (...keys) => {
+      for (const key of keys) {
+        const value = material[key];
+        if (typeof value === "string" && value.trim()) return value.trim();
       }
+      return "";
+    };
 
-      count = Math.max(0, Math.min(count, indexCount - firstIndex));
-      count -= count % 3;
-      if (count <= 0) continue;
-
-      out.push({
-        firstIndex,
-        indexCount: count,
-        materialIndex: Math.max(
-          0,
-          Number(item.materialIndex ?? item.MaterialIndex ?? item.material ?? item.Material ?? 0) || 0
-        ),
-        name: String(item.name ?? item.Name ?? item.materialName ?? item.MaterialName ?? "")
-      });
-    }
-
-    return out;
-  }
-
-  function normalizeMaterial(item, index) {
-    item = item && typeof item === "object" ? item : {};
-
-    const color = item.baseColor ?? item.BaseColor ?? item.color ?? item.Color ?? [1,1,1,1];
-    let baseColor = [1,1,1,1];
-
-    if (Array.isArray(color)) {
-      baseColor = [
-        Number(color[0] ?? 1),
-        Number(color[1] ?? 1),
-        Number(color[2] ?? 1),
-        Number(color[3] ?? 1)
-      ];
-    } else if (color && typeof color === "object") {
-      baseColor = [
-        Number(color.r ?? color.R ?? color.x ?? color.X ?? 1),
-        Number(color.g ?? color.G ?? color.y ?? color.Y ?? 1),
-        Number(color.b ?? color.B ?? color.z ?? color.Z ?? 1),
-        Number(color.a ?? color.A ?? color.w ?? color.W ?? 1)
-      ];
-    }
-
-    baseColor = baseColor.map((v, i) => Number.isFinite(v) ? Math.max(0, Math.min(i === 3 ? 1 : 8, v)) : 1);
-
-    const texture = (name) => {
-      const value = item[name];
-      return typeof value === "string" && /^https?:\/\//i.test(value) ? value : "";
+    const texture = (...keys) => {
+      const path = pathValue(...keys);
+      return path ? textureUrl(path) : "";
     };
 
     return {
       index,
-      name: String(item.name ?? item.Name ?? `Material_${index}`),
-      baseColor,
-      baseColorTexture:
-        texture("baseColorTexture") ||
-        texture("albedoTexture") ||
-        texture("diffuseTexture") ||
-        texture("colorTexture"),
-      normalTexture: texture("normalTexture"),
-      emissiveTexture: texture("emissiveTexture"),
-      opacityTexture:
-        texture("opacityTexture") ||
-        texture("maskTexture"),
-      roughness: Math.max(0, Math.min(1, Number(item.roughness ?? item.Roughness ?? 0.62) || 0.62)),
-      metallic: Math.max(0, Math.min(1, Number(item.metallic ?? item.Metallic ?? 0) || 0)),
-      opacity: Math.max(0, Math.min(1, Number(item.opacity ?? item.Opacity ?? baseColor[3] ?? 1) || 1)),
-      opacityMode: String(item.opacityMode ?? item.blendMode ?? item.BlendMode ?? "opaque").toLowerCase(),
-      opacityCutoff: Math.max(0, Math.min(1, Number(item.opacityCutoff ?? item.maskClip ?? 0.333) || 0.333)),
-      twoSided: Boolean(item.twoSided ?? item.TwoSided ?? item.isTwoSided ?? false),
-      uvScale: Array.isArray(item.uvScale) ? [
-        Number(item.uvScale[0] ?? 1) || 1,
-        Number(item.uvScale[1] ?? 1) || 1
-      ] : [1,1],
-      uvOffset: Array.isArray(item.uvOffset) ? [
-        Number(item.uvOffset[0] ?? 0) || 0,
-        Number(item.uvOffset[1] ?? 0) || 0
-      ] : [0,0]
+      name: String(material.name ?? material.Name ?? `Material_${index}`),
+      path: String(material.path ?? material.Path ?? ""),
+
+      baseColor: rgba(material.baseColor ?? material.BaseColor, [1, 1, 1, 1]),
+      emissiveColor: rgba(material.emissiveColor ?? material.EmissiveColor, [0, 0, 0, 1]),
+
+      roughness: clamp(material.roughness ?? material.Roughness, 0, 1, 0.62),
+      metallic: clamp(material.metallic ?? material.Metallic, 0, 1, 0),
+      specular: clamp(material.specular ?? material.Specular, 0, 1, 0.5),
+      opacity: clamp(material.opacity ?? material.Opacity, 0, 1, 1),
+      opacityMode: String(material.opacityMode ?? material.OpacityMode ?? "opaque").toLowerCase(),
+      opacityCutoff: clamp(material.opacityCutoff ?? material.OpacityCutoff, 0, 1, 0.333),
+
+      twoSided: Boolean(material.twoSided ?? material.TwoSided),
+      useVertexColor: Boolean(material.useVertexColor ?? material.UseVertexColor),
+
+      uvScale: Array.isArray(material.uvScale ?? material.UvScale)
+        ? (material.uvScale ?? material.UvScale).slice(0, 2).map(Number)
+        : [1, 1],
+      uvOffset: Array.isArray(material.uvOffset ?? material.UvOffset)
+        ? (material.uvOffset ?? material.UvOffset).slice(0, 2).map(Number)
+        : [0, 0],
+
+      baseColorTexture: texture("baseColorTexture", "BaseColorTexture"),
+      normalTexture: texture("normalTexture", "NormalTexture"),
+      emissiveTexture: texture("emissiveTexture", "EmissiveTexture"),
+      opacityTexture: texture("opacityTexture", "OpacityTexture"),
+      packedTexture: texture("packedTexture", "PackedTexture"),
+
+      baseColorTexturePath: pathValue("baseColorTexture", "BaseColorTexture"),
+      normalTexturePath: pathValue("normalTexture", "NormalTexture"),
+      emissiveTexturePath: pathValue("emissiveTexture", "EmissiveTexture"),
+      opacityTexturePath: pathValue("opacityTexture", "OpacityTexture"),
+      packedTexturePath: pathValue("packedTexture", "PackedTexture"),
+
+      packedChannels: {
+        ao: Number(material.packedChannels?.ao ?? material.PackedChannels?.Ao ?? -1),
+        roughness: Number(material.packedChannels?.roughness ?? material.PackedChannels?.Roughness ?? -1),
+        metallic: Number(material.packedChannels?.metallic ?? material.PackedChannels?.Metallic ?? -1)
+      },
+
+      fidelity: String(material.fidelity ?? material.Fidelity ?? "unknown").toLowerCase(),
+      evidence: String(material.evidence ?? material.Evidence ?? "")
     };
   }
 
+  function normalizeSections(raw, indexCount) {
+    if (!Array.isArray(raw)) return [];
+
+    return raw.slice(0, 256).map((section) => {
+      const firstIndex = Math.max(0, Number(section.firstIndex ?? section.FirstIndex ?? 0) || 0);
+      let count = Number(section.indexCount ?? section.IndexCount ?? 0) ||
+        ((Number(section.numFaces ?? section.NumFaces ?? 0) || 0) * 3);
+
+      count = Math.max(0, Math.min(count, indexCount - firstIndex));
+      count -= count % 3;
+
+      return {
+        firstIndex,
+        indexCount: count,
+        materialIndex: Math.max(0, Number(section.materialIndex ?? section.MaterialIndex ?? 0) || 0),
+        name: String(section.name ?? section.Name ?? "")
+      };
+    }).filter((section) => section.indexCount > 0);
+  }
+
+  function normalizeReferences(raw) {
+    if (!Array.isArray(raw)) return [];
+
+    const seen = new Set();
+    const out = [];
+
+    for (const item of raw) {
+      const path = typeof item === "string"
+        ? item
+        : String(item?.path ?? item?.Path ?? "").trim();
+      if (!path) continue;
+
+      const key = path.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      out.push({
+        kind: typeof item === "object" ? String(item.kind ?? item.Kind ?? "reference") : "reference",
+        path
+      });
+
+      if (out.length >= 128) break;
+    }
+
+    return out;
+  }
+
   function normalizeManifest(data, requestedPath = "") {
-    if (!data || typeof data !== "object") throw new Error("NovaSparx returned an empty manifest.");
+    if (!data || typeof data !== "object") {
+      throw new Error("NovaSparx returned an empty manifest.");
+    }
 
     const manifest = data.manifest && typeof data.manifest === "object" ? data.manifest : data;
-    const geometry = manifest.geometry && typeof manifest.geometry === "object"
-      ? manifest.geometry
-      : manifest;
+    const geometry = manifest.geometry || manifest.Geometry || manifest;
 
-    const positions = finiteArray(
-      geometry.positions ?? geometry.vertices ?? geometry.Positions ?? geometry.Vertices,
-      3,
-      MAX_VERTICES
-    );
-
-    const indicesRaw = geometry.indices ?? geometry.triangles ?? geometry.Indices ?? geometry.Triangles;
-    let indices = null;
-
-    if (Array.isArray(indicesRaw) || ArrayBuffer.isView(indicesRaw)) {
-      const flat = ArrayBuffer.isView(indicesRaw) ? Array.from(indicesRaw) : indicesRaw;
-      if (flat.length && typeof flat[0] === "number") {
-        indices = flat
-          .slice(0, MAX_INDICES)
-          .map(Number)
-          .filter(Number.isInteger);
-      } else if (flat.length) {
-        indices = [];
-        for (const tri of flat) {
-          if (Array.isArray(tri) && tri.length >= 3) {
-            indices.push(Number(tri[0]), Number(tri[1]), Number(tri[2]));
-          } else if (tri && typeof tri === "object") {
-            indices.push(
-              Number(tri.a ?? tri.A ?? tri.x ?? tri.X ?? tri.i0 ?? tri.I0),
-              Number(tri.b ?? tri.B ?? tri.y ?? tri.Y ?? tri.i1 ?? tri.I1),
-              Number(tri.c ?? tri.C ?? tri.z ?? tri.Z ?? tri.i2 ?? tri.I2)
-            );
-          }
-          if (indices.length >= MAX_INDICES) break;
-        }
-        indices = indices.filter(Number.isInteger);
-      }
-    }
+    const positions = finiteArray(geometry.positions ?? geometry.Positions, 3, MAX_VERTICES);
+    let indices = finiteArray(geometry.indices ?? geometry.Indices, 1, MAX_INDICES);
 
     if (!positions || !indices || positions.length < 9 || indices.length < 3) {
       throw new Error("NovaSparx manifest does not contain usable geometry.");
     }
 
+    indices = indices.map(Number).filter(Number.isInteger);
     indices.length -= indices.length % 3;
+
     const vertexCount = positions.length / 3;
-    if (indices.some((i) => i < 0 || i >= vertexCount)) {
-      throw new Error("NovaSparx geometry has invalid indices.");
+    if (indices.some((index) => index < 0 || index >= vertexCount)) {
+      throw new Error("NovaSparx geometry contains invalid indices.");
     }
 
     const normals = finiteArray(geometry.normals ?? geometry.Normals, 3, MAX_VERTICES);
     const tangents = finiteArray(geometry.tangents ?? geometry.Tangents, 4, MAX_VERTICES);
-    const uv0 = finiteArray(
-      geometry.uv0 ?? geometry.uvs ?? geometry.UV0 ?? geometry.UVs,
-      2,
-      MAX_VERTICES
-    );
-    const colors = finiteArray(
-      geometry.colors ?? geometry.vertexColors ?? geometry.Colors ?? geometry.VertexColors,
-      4,
-      MAX_VERTICES
-    );
+    const uv0 = finiteArray(geometry.uv0 ?? geometry.Uv0 ?? geometry.UV0, 2, MAX_VERTICES);
+    const colors = finiteArray(geometry.colors ?? geometry.Colors, 4, MAX_VERTICES);
 
-    const sections = normalizeSections(
-      manifest.sections ?? geometry.sections ?? manifest.Sections ?? geometry.Sections,
-      indices.length
-    );
-
-    const rawMaterials = Array.isArray(manifest.materials)
-      ? manifest.materials
-      : Array.isArray(geometry.materials)
-      ? geometry.materials
+    const materialsRaw = manifest.materials ?? manifest.Materials ?? [];
+    const materials = Array.isArray(materialsRaw)
+      ? materialsRaw.slice(0, MAX_MATERIALS).map(normalizeMaterial)
       : [];
-
-    const materials = rawMaterials
-      .slice(0, MAX_MATERIALS)
-      .map(normalizeMaterial);
 
     if (!materials.length) materials.push(normalizeMaterial({}, 0));
 
+    const sections = normalizeSections(
+      manifest.sections ?? manifest.Sections,
+      indices.length
+    );
+
+    const references = normalizeReferences(
+      manifest.references ?? manifest.References ?? data.references ?? data.References
+    );
+
     return {
       schema: "novasparx.preview.v1",
-      path: cleanPath(manifest.path ?? data.path ?? requestedPath),
-      resolvedPath: String(manifest.resolvedPath ?? data.resolvedPath ?? ""),
-      assetType: String(manifest.assetType ?? data.assetType ?? "StaticMesh"),
-      source: String(manifest.source ?? data.source ?? "NovaSparx"),
-      sourceChain: Array.isArray(data.sourceChain) ? data.sourceChain : [],
-      quality: String(manifest.quality ?? data.quality ?? (uv0 ? "textured-capable" : "geometry")),
+      path: cleanPath(manifest.path ?? manifest.Path ?? requestedPath),
+      resolvedPath: String(data.resolvedPath ?? data.ResolvedPath ?? manifest.resolvedPath ?? manifest.ResolvedPath ?? ""),
+      assetType: String(data.assetType ?? data.AssetType ?? manifest.assetType ?? manifest.AssetType ?? "Unknown"),
+      source: String(data.source ?? data.Source ?? "NovaSparx"),
+      quality: String(manifest.quality ?? manifest.Quality ?? "preview"),
+
       geometry: {
         positions,
         indices,
@@ -335,42 +307,46 @@
         uv0: uv0 && uv0.length / 2 === vertexCount ? uv0 : null,
         colors: colors && colors.length / 4 === vertexCount ? colors : null
       },
+
       sections,
       materials,
+      references,
+
       metadata: {
         vertexCount,
         triangleCount: indices.length / 3,
-        isNanite: Boolean(manifest.isNanite ?? geometry.isNanite ?? false),
-        lod: Number(manifest.lod ?? geometry.lod ?? 0) || 0,
-        backend: String(data.backend ?? "")
+        isNanite: Boolean(manifest.isNanite ?? manifest.IsNanite),
+        lod: Number(manifest.lod ?? manifest.Lod ?? 0),
+        materialFidelity: String(
+          manifest.materialFidelity ?? manifest.MaterialFidelity ??
+          data.materialFidelity ?? data.MaterialFidelity ?? "unknown"
+        ).toLowerCase()
       }
     };
   }
 
-  async function resolve(path, options = {}) {
-    if (!API_ENDPOINT) throw new Error("FNAA API endpoint is not configured.");
-
-    const url = new URL(`${API_ENDPOINT}/nova/resolve`);
-    url.searchParams.set("path", String(path || "").trim());
-    if (options.preferHQ !== false) url.searchParams.set("quality", "hq");
-
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      mode: "cors",
+  async function requestJson(url, options = {}) {
+    const response = await fetch(url, {
       cache: options.noCache ? "no-store" : "force-cache",
       headers: { Accept: "application/json" }
     });
 
     const data = await response.json().catch(() => ({}));
+    return { response, data };
+  }
 
-    if (!response.ok || data?.state !== "ready") {
-      const error = new Error(
-        data?.error ||
-        (response.status === 404
-          ? "NovaSparx could not resolve renderable geometry for this asset."
-          : `NovaSparx resolver returned HTTP ${response.status}.`)
-      );
-      error.code = data?.code || (response.status === 404 ? "NOVA_MISSING" : "NOVA_ERROR");
+  async function resolve(path, options = {}) {
+    if (!API) throw new Error("FNAA API endpoint is not configured.");
+
+    const url = new URL(`${API}/nova/resolve`);
+    url.searchParams.set("path", String(path || ""));
+    url.searchParams.set("quality", options.preferHQ === false ? "normal" : "hq");
+
+    const { response, data } = await requestJson(url, options);
+
+    if (!response.ok || data.state !== "ready") {
+      const error = new Error(data.error || `NovaSparx resolver returned HTTP ${response.status}.`);
+      error.code = data.code || (response.status === 404 ? "NOVA_MISSING" : "NOVA_ERROR");
       error.details = data;
       throw error;
     }
@@ -378,15 +354,31 @@
     return normalizeManifest(data, path);
   }
 
+  async function inspect(path, options = {}) {
+    if (!API) throw new Error("FNAA API endpoint is not configured.");
+
+    const url = new URL(`${API}/nova/inspect`);
+    url.searchParams.set("path", String(path || ""));
+
+    const { response, data } = await requestJson(url, { ...options, noCache: true });
+
+    if (!response.ok) {
+      const error = new Error(data.error || `NovaSparx inspect returned HTTP ${response.status}.`);
+      error.code = data.code || "NOVA_INSPECT_ERROR";
+      error.details = data;
+      throw error;
+    }
+
+    return data;
+  }
+
   window.NovaSparx = Object.freeze({
-    version: "0.1.0-alpha",
+    version: "1.0.0",
     resolve,
+    inspect,
     normalizeManifest,
     cleanPath,
     objectPath,
-    filesystemPath,
-    aliases
+    textureUrl
   });
-
-  console.info("NovaSparx Core 0.1 alpha loaded.");
 })();
