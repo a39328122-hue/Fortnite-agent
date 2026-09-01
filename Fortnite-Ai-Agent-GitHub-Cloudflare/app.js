@@ -2590,7 +2590,7 @@
 
     dbWorker =
       new Worker(
-        "./database-worker.js?v=1"
+        "./database-worker.js?v=2"
       );
 
     dbWorker.addEventListener(
