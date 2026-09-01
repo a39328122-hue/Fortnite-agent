@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>FNAA</title>
+</head>
+<body>
+<script>
+(() => {
+  "use strict";
+
+  const base = "/Fortnite-agent/";
+  const current =
+    location.pathname +
+    location.search +
+    location.hash;
+
+  try {
+    sessionStorage.setItem(
+      "fnaa:github-pages-route",
+      current
+    );
+  } catch {}
+
+  location.replace(base);
+})();
+</script>
+</body>
+</html>
