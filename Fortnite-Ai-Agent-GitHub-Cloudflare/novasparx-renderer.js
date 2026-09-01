@@ -1,146 +1,207 @@
 (() => {
   "use strict";
 
-  const DEFAULT_BG = [0, 0, 0, 0];
+  const TRANSPARENT = [0, 0, 0, 0];
 
-  function typed(raw, Type = Float32Array) {
-    return raw instanceof Type ? raw : new Type(raw);
+  function asTyped(value, Type) {
+    return value instanceof Type ? value : new Type(value);
   }
 
   function calculateNormals(positions, indices) {
     const normals = new Float32Array(positions.length);
 
     for (let i = 0; i + 2 < indices.length; i += 3) {
-      const ia = indices[i] * 3;
-      const ib = indices[i + 1] * 3;
-      const ic = indices[i + 2] * 3;
+      const a = indices[i] * 3;
+      const b = indices[i + 1] * 3;
+      const c = indices[i + 2] * 3;
 
-      const ax = positions[ia], ay = positions[ia + 1], az = positions[ia + 2];
-      const bx = positions[ib], by = positions[ib + 1], bz = positions[ib + 2];
-      const cx = positions[ic], cy = positions[ic + 1], cz = positions[ic + 2];
+      const abx = positions[b] - positions[a];
+      const aby = positions[b + 1] - positions[a + 1];
+      const abz = positions[b + 2] - positions[a + 2];
 
-      const abx = bx - ax, aby = by - ay, abz = bz - az;
-      const acx = cx - ax, acy = cy - ay, acz = cz - az;
+      const acx = positions[c] - positions[a];
+      const acy = positions[c + 1] - positions[a + 1];
+      const acz = positions[c + 2] - positions[a + 2];
 
       const nx = aby * acz - abz * acy;
       const ny = abz * acx - abx * acz;
       const nz = abx * acy - aby * acx;
 
-      for (const o of [ia, ib, ic]) {
-        normals[o] += nx;
-        normals[o + 1] += ny;
-        normals[o + 2] += nz;
+      for (const offset of [a, b, c]) {
+        normals[offset] += nx;
+        normals[offset + 1] += ny;
+        normals[offset + 2] += nz;
       }
     }
 
     for (let i = 0; i < normals.length; i += 3) {
-      const len = Math.hypot(normals[i], normals[i + 1], normals[i + 2]) || 1;
-      normals[i] /= len;
-      normals[i + 1] /= len;
-      normals[i + 2] /= len;
+      const length = Math.hypot(normals[i], normals[i + 1], normals[i + 2]) || 1;
+      normals[i] /= length;
+      normals[i + 1] /= length;
+      normals[i + 2] /= length;
     }
+
     return normals;
   }
 
-  function boundsOf(p) {
-    let minX=Infinity,minY=Infinity,minZ=Infinity;
-    let maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
+  function getBounds(positions) {
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
 
-    for (let i=0;i<p.length;i+=3) {
-      const x=p[i],y=p[i+1],z=p[i+2];
-      if(x<minX)minX=x;if(x>maxX)maxX=x;
-      if(y<minY)minY=y;if(y>maxY)maxY=y;
-      if(z<minZ)minZ=z;if(z>maxZ)maxZ=z;
+    for (let i = 0; i < positions.length; i += 3) {
+      const x = positions[i];
+      const y = positions[i + 1];
+      const z = positions[i + 2];
+
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      minZ = Math.min(minZ, z);
+
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      maxZ = Math.max(maxZ, z);
     }
 
-    const cx=(minX+maxX)/2, cy=(minY+maxY)/2, cz=(minZ+maxZ)/2;
-    const sx=Math.max(1e-6,maxX-minX);
-    const sy=Math.max(1e-6,maxY-minY);
-    const sz=Math.max(1e-6,maxZ-minZ);
-    const radius=Math.max(1e-6,Math.hypot(sx,sy,sz)/2);
+    const centerX = (minX + maxX) * 0.5;
+    const centerY = (minY + maxY) * 0.5;
+    const centerZ = (minZ + maxZ) * 0.5;
 
-    return {minX,minY,minZ,maxX,maxY,maxZ,cx,cy,cz,sx,sy,sz,radius};
+    const sizeX = maxX - minX || 1;
+    const sizeY = maxY - minY || 1;
+    const sizeZ = maxZ - minZ || 1;
+
+    return {
+      centerX,
+      centerY,
+      centerZ,
+      sizeX,
+      sizeY,
+      sizeZ,
+      radius: Math.hypot(sizeX, sizeY, sizeZ) * 0.5 || 1
+    };
   }
 
-  function mat4Identity() {
-    return new Float32Array([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]);
-  }
-
-  function mat4Multiply(a,b) {
-    const o=new Float32Array(16);
-    for(let c=0;c<4;c++)for(let r=0;r<4;r++){
-      o[c*4+r]=
-        a[r]*b[c*4]+
-        a[4+r]*b[c*4+1]+
-        a[8+r]*b[c*4+2]+
-        a[12+r]*b[c*4+3];
-    }
-    return o;
-  }
-
-  function mat4Translation(x,y,z) {
-    const m=mat4Identity();
-    m[12]=x;m[13]=y;m[14]=z;
-    return m;
-  }
-
-  function mat4Scale(s) {
-    const m=mat4Identity();
-    m[0]=m[5]=m[10]=s;
-    return m;
-  }
-
-  function lookAt(eye,center,up) {
-    let zx=eye[0]-center[0],zy=eye[1]-center[1],zz=eye[2]-center[2];
-    let len=Math.hypot(zx,zy,zz)||1;zx/=len;zy/=len;zz/=len;
-
-    let xx=up[1]*zz-up[2]*zy,xy=up[2]*zx-up[0]*zz,xz=up[0]*zy-up[1]*zx;
-    len=Math.hypot(xx,xy,xz)||1;xx/=len;xy/=len;xz/=len;
-
-    const yx=zy*xz-zz*xy,yy=zz*xx-zx*xz,yz=zx*xy-zy*xx;
-
+  function identity() {
     return new Float32Array([
-      xx,yx,zx,0,xy,yy,zy,0,xz,yz,zz,0,
-      -(xx*eye[0]+xy*eye[1]+xz*eye[2]),
-      -(yx*eye[0]+yy*eye[1]+yz*eye[2]),
-      -(zx*eye[0]+zy*eye[1]+zz*eye[2]),1
+      1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, 1, 0,
+      0, 0, 0, 1
     ]);
   }
 
-  function ortho(l,r,b,t,n,f) {
-    const lr=1/(l-r),bt=1/(b-t),nf=1/(n-f);
+  function multiply(a, b) {
+    const out = new Float32Array(16);
+
+    for (let column = 0; column < 4; column++) {
+      for (let row = 0; row < 4; row++) {
+        out[column * 4 + row] =
+          a[row] * b[column * 4] +
+          a[4 + row] * b[column * 4 + 1] +
+          a[8 + row] * b[column * 4 + 2] +
+          a[12 + row] * b[column * 4 + 3];
+      }
+    }
+
+    return out;
+  }
+
+  function translation(x, y, z) {
+    const matrix = identity();
+    matrix[12] = x;
+    matrix[13] = y;
+    matrix[14] = z;
+    return matrix;
+  }
+
+  function uniformScale(scale) {
+    const matrix = identity();
+    matrix[0] = scale;
+    matrix[5] = scale;
+    matrix[10] = scale;
+    return matrix;
+  }
+
+  function lookAt(eye, center, up) {
+    let zx = eye[0] - center[0];
+    let zy = eye[1] - center[1];
+    let zz = eye[2] - center[2];
+
+    let length = Math.hypot(zx, zy, zz) || 1;
+    zx /= length;
+    zy /= length;
+    zz /= length;
+
+    let xx = up[1] * zz - up[2] * zy;
+    let xy = up[2] * zx - up[0] * zz;
+    let xz = up[0] * zy - up[1] * zx;
+
+    length = Math.hypot(xx, xy, xz) || 1;
+    xx /= length;
+    xy /= length;
+    xz /= length;
+
+    const yx = zy * xz - zz * xy;
+    const yy = zz * xx - zx * xz;
+    const yz = zx * xy - zy * xx;
+
     return new Float32Array([
-      -2*lr,0,0,0,
-      0,-2*bt,0,0,
-      0,0,2*nf,0,
-      (l+r)*lr,(t+b)*bt,(f+n)*nf,1
+      xx, yx, zx, 0,
+      xy, yy, zy, 0,
+      xz, yz, zz, 0,
+      -(xx * eye[0] + xy * eye[1] + xz * eye[2]),
+      -(yx * eye[0] + yy * eye[1] + yz * eye[2]),
+      -(zx * eye[0] + zy * eye[1] + zz * eye[2]),
+      1
+    ]);
+  }
+
+  function orthographic(left, right, bottom, top, near, far) {
+    const lr = 1 / (left - right);
+    const bt = 1 / (bottom - top);
+    const nf = 1 / (near - far);
+
+    return new Float32Array([
+      -2 * lr, 0, 0, 0,
+      0, -2 * bt, 0, 0,
+      0, 0, 2 * nf, 0,
+      (left + right) * lr,
+      (top + bottom) * bt,
+      (far + near) * nf,
+      1
     ]);
   }
 
   function chooseCamera(bounds) {
-    const horizontal = Math.max(bounds.sx, bounds.sy);
-    const flatness = bounds.sz / horizontal;
-    const tallness = bounds.sz / Math.max(Math.min(bounds.sx,bounds.sy),1e-6);
+    const horizontal = Math.max(bounds.sizeX, bounds.sizeY);
+    const flatness = bounds.sizeZ / horizontal;
+    const tallness = bounds.sizeZ / Math.max(Math.min(bounds.sizeX, bounds.sizeY), 1e-6);
 
-    if (flatness < 0.13) return [2.25,-2.25,4.20];
-    if (tallness > 4.5) return [3.15,-3.15,2.15];
-    if (bounds.sx / bounds.sy > 4 || bounds.sy / bounds.sx > 4) return [2.75,-2.75,2.85];
-    return [2.85,-2.85,2.65];
-  }
-
-  function compile(gl,type,src) {
-    const s=gl.createShader(type);
-    gl.shaderSource(s,src);
-    gl.compileShader(s);
-    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){
-      const e=gl.getShaderInfoLog(s)||"Shader compile failed";
-      gl.deleteShader(s);throw new Error(e);
+    if (flatness < 0.13) return [2.25, -2.25, 4.2];
+    if (tallness > 4.5) return [3.15, -3.15, 2.15];
+    if (bounds.sizeX / bounds.sizeY > 4 || bounds.sizeY / bounds.sizeX > 4) {
+      return [2.75, -2.75, 2.85];
     }
-    return s;
+
+    return [2.85, -2.85, 2.65];
   }
 
-  function program(gl) {
-    const vs=compile(gl,gl.VERTEX_SHADER,`
+  function compileShader(gl, type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      const message = gl.getShaderInfoLog(shader) || "Shader compilation failed.";
+      gl.deleteShader(shader);
+      throw new Error(message);
+    }
+
+    return shader;
+  }
+
+  function createProgram(gl) {
+    const vertexSource = `
       attribute vec3 aPosition;
       attribute vec3 aNormal;
       attribute vec2 aUV;
@@ -158,17 +219,17 @@
       varying vec2 vUV;
       varying vec4 vColor;
 
-      void main(){
-        gl_Position=uMVP*vec4(aPosition,1.0);
-        vNormal=normalize(mat3(uModel)*aNormal);
-        vTangent=normalize(mat3(uModel)*aTangent.xyz);
-        vTangentSign=aTangent.w;
-        vUV=aUV*uUVScale+uUVOffset;
-        vColor=aColor;
+      void main() {
+        gl_Position = uMVP * vec4(aPosition, 1.0);
+        vNormal = normalize(mat3(uModel) * aNormal);
+        vTangent = normalize(mat3(uModel) * aTangent.xyz);
+        vTangentSign = aTangent.w;
+        vUV = aUV * uUVScale + uUVOffset;
+        vColor = aColor;
       }
-    `);
+    `;
 
-    const fs=compile(gl,gl.FRAGMENT_SHADER,`
+    const fragmentSource = `
       precision highp float;
 
       varying vec3 vNormal;
@@ -178,336 +239,585 @@
       varying vec4 vColor;
 
       uniform vec4 uBaseColor;
+      uniform vec4 uEmissiveColor;
       uniform float uRoughness;
       uniform float uMetallic;
+      uniform float uSpecular;
       uniform float uOpacity;
-      uniform float uOpacityCutoff;
+      uniform float uCutoff;
       uniform int uAlphaMode;
+      uniform int uUseVertexColor;
+
+      uniform int uHasBase;
+      uniform int uHasNormal;
+      uniform int uHasEmissive;
+      uniform int uHasOpacity;
+      uniform int uHasPacked;
+
+      uniform int uAOChannel;
+      uniform int uRoughnessChannel;
+      uniform int uMetallicChannel;
 
       uniform sampler2D uBaseMap;
       uniform sampler2D uNormalMap;
       uniform sampler2D uEmissiveMap;
       uniform sampler2D uOpacityMap;
+      uniform sampler2D uPackedMap;
 
-      uniform bool uHasBaseMap;
-      uniform bool uHasNormalMap;
-      uniform bool uHasEmissiveMap;
-      uniform bool uHasOpacityMap;
-      uniform bool uUseVertexColor;
-
-      vec3 srgbToLinear(vec3 c){return pow(max(c,vec3(0.0)),vec3(2.2));}
-      vec3 linearToSrgb(vec3 c){return pow(max(c,vec3(0.0)),vec3(1.0/2.2));}
-
-      void main(){
-        vec4 base=uBaseColor;
-
-        if(uHasBaseMap){
-          vec4 tex=texture2D(uBaseMap,vUV);
-          base.rgb*=srgbToLinear(tex.rgb);
-          base.a*=tex.a;
-        }else{
-          base.rgb=srgbToLinear(base.rgb);
-        }
-
-        if(uUseVertexColor){
-          base.rgb*=srgbToLinear(vColor.rgb);
-          base.a*=vColor.a;
-        }
-
-        float alpha=base.a*uOpacity;
-        if(uHasOpacityMap) alpha*=texture2D(uOpacityMap,vUV).r;
-
-        if(uAlphaMode==1 && alpha<uOpacityCutoff) discard;
-        if(alpha<=0.003) discard;
-
-        vec3 n=normalize(vNormal);
-        if(uHasNormalMap){
-          vec3 t=normalize(vTangent);
-          vec3 b=normalize(cross(n,t))*vTangentSign;
-          mat3 tbn=mat3(t,b,n);
-          vec3 mapN=texture2D(uNormalMap,vUV).xyz*2.0-1.0;
-          n=normalize(tbn*mapN);
-        }
-
-        vec3 key=normalize(vec3(0.45,-0.55,0.75));
-        vec3 fill=normalize(vec3(-0.70,0.25,0.55));
-        vec3 viewDir=normalize(vec3(0.45,-0.45,0.75));
-
-        float ndl=max(dot(n,key),0.0);
-        float fillL=max(dot(n,fill),0.0);
-        float hemi=0.30+0.18*(n.z*0.5+0.5);
-
-        vec3 halfDir=normalize(key+viewDir);
-        float specPower=mix(80.0,8.0,uRoughness);
-        float spec=pow(max(dot(n,halfDir),0.0),specPower);
-        vec3 specColor=mix(vec3(0.04),base.rgb,uMetallic);
-
-        vec3 color=base.rgb*(hemi+ndl*0.62+fillL*0.18);
-        color+=specColor*spec*mix(0.22,0.72,1.0-uRoughness);
-
-        if(uHasEmissiveMap){
-          color+=srgbToLinear(texture2D(uEmissiveMap,vUV).rgb);
-        }
-
-        gl_FragColor=vec4(linearToSrgb(color),alpha);
+      float channelValue(vec4 value, int channel) {
+        if (channel == 0) return value.r;
+        if (channel == 1) return value.g;
+        if (channel == 2) return value.b;
+        if (channel == 3) return value.a;
+        return 1.0;
       }
-    `);
 
-    const p=gl.createProgram();
-    gl.attachShader(p,vs);gl.attachShader(p,fs);gl.linkProgram(p);
-    gl.deleteShader(vs);gl.deleteShader(fs);
-    if(!gl.getProgramParameter(p,gl.LINK_STATUS)){
-      const e=gl.getProgramInfoLog(p)||"Shader link failed";gl.deleteProgram(p);throw new Error(e);
+      vec3 toLinear(vec3 color) {
+        return pow(max(color, vec3(0.0)), vec3(2.2));
+      }
+
+      vec3 toSrgb(vec3 color) {
+        return pow(max(color, vec3(0.0)), vec3(1.0 / 2.2));
+      }
+
+      void main() {
+        vec4 base = uBaseColor;
+
+        if (uHasBase == 1) {
+          vec4 texel = texture2D(uBaseMap, vUV);
+          base.rgb *= toLinear(texel.rgb);
+          base.a *= texel.a;
+        } else {
+          base.rgb = toLinear(base.rgb);
+        }
+
+        if (uUseVertexColor == 1) {
+          base.rgb *= toLinear(vColor.rgb);
+          base.a *= vColor.a;
+        }
+
+        float alpha = base.a * uOpacity;
+
+        if (uHasOpacity == 1) {
+          alpha *= texture2D(uOpacityMap, vUV).r;
+        }
+
+        if (uAlphaMode == 1 && alpha < uCutoff) discard;
+        if (alpha < 0.003) discard;
+
+        vec3 normal = normalize(vNormal);
+
+        if (uHasNormal == 1) {
+          vec3 tangent = normalize(vTangent);
+          vec3 bitangent = normalize(cross(normal, tangent)) * vTangentSign;
+          vec3 sampledNormal = texture2D(uNormalMap, vUV).xyz * 2.0 - 1.0;
+          normal = normalize(mat3(tangent, bitangent, normal) * sampledNormal);
+        }
+
+        float roughness = uRoughness;
+        float metallic = uMetallic;
+        float ao = 1.0;
+
+        if (uHasPacked == 1) {
+          vec4 packed = texture2D(uPackedMap, vUV);
+
+          if (uRoughnessChannel >= 0) {
+            roughness = channelValue(packed, uRoughnessChannel);
+          }
+          if (uMetallicChannel >= 0) {
+            metallic = channelValue(packed, uMetallicChannel);
+          }
+          if (uAOChannel >= 0) {
+            ao = channelValue(packed, uAOChannel);
+          }
+        }
+
+        roughness = clamp(roughness, 0.04, 1.0);
+        metallic = clamp(metallic, 0.0, 1.0);
+
+        vec3 keyLight = normalize(vec3(0.46, -0.55, 0.75));
+        vec3 fillLight = normalize(vec3(-0.7, 0.25, 0.55));
+        vec3 viewDirection = normalize(vec3(0.45, -0.45, 0.75));
+
+        float key = max(dot(normal, keyLight), 0.0);
+        float fill = max(dot(normal, fillLight), 0.0);
+        float hemi = 0.29 + 0.18 * (normal.z * 0.5 + 0.5);
+
+        vec3 halfVector = normalize(keyLight + viewDirection);
+        float specPower = mix(120.0, 7.0, roughness);
+        float specularTerm = pow(max(dot(normal, halfVector), 0.0), specPower);
+
+        vec3 f0 = mix(vec3(0.04 * uSpecular), base.rgb, metallic);
+
+        vec3 color =
+          base.rgb * (hemi * ao + key * 0.64 + fill * 0.16) +
+          f0 * specularTerm * mix(0.18, 0.72, 1.0 - roughness);
+
+        vec3 emissive = toLinear(uEmissiveColor.rgb) * uEmissiveColor.a;
+
+        if (uHasEmissive == 1) {
+          emissive *= toLinear(texture2D(uEmissiveMap, vUV).rgb);
+        }
+
+        color += emissive;
+
+        gl_FragColor = vec4(toSrgb(color), alpha);
+      }
+    `;
+
+    const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexSource);
+    const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
+
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+
+    gl.deleteShader(vertexShader);
+    gl.deleteShader(fragmentShader);
+
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      throw new Error(gl.getProgramInfoLog(program) || "Shader program failed to link.");
     }
-    return p;
+
+    return program;
   }
 
-  function solidTexture(gl, rgba=[255,255,255,255]) {
-    const tex=gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D,tex);
-    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array(rgba));
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT);
-    return tex;
+  function createBuffer(gl, data, target = gl.ARRAY_BUFFER) {
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(target, buffer);
+    gl.bufferData(target, data, gl.STATIC_DRAW);
+    return buffer;
   }
 
-  async function imageTexture(gl,url, fallback) {
-    if(!url)return {texture:fallback,loaded:false};
+  function setAttribute(gl, program, name, buffer, size, fallback) {
+    const location = gl.getAttribLocation(program, name);
+    if (location < 0) return;
 
-    try{
-      const r=await fetch(url,{mode:"cors",cache:"force-cache"});
-      if(!r.ok)throw new Error(String(r.status));
-      const blob=await r.blob();
-      const bitmap=await createImageBitmap(blob,{premultiplyAlpha:"none",colorSpaceConversion:"default"});
-      const tex=gl.createTexture();
-      gl.bindTexture(gl.TEXTURE_2D,tex);
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,1);
-      gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,bitmap);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.REPEAT);
-      gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.REPEAT);
+    if (buffer) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.enableVertexAttribArray(location);
+      gl.vertexAttribPointer(location, size, gl.FLOAT, false, 0, 0);
+      return;
+    }
+
+    gl.disableVertexAttribArray(location);
+
+    if (size === 2) gl.vertexAttrib2f(location, fallback[0], fallback[1]);
+    else if (size === 3) gl.vertexAttrib3f(location, fallback[0], fallback[1], fallback[2]);
+    else gl.vertexAttrib4f(location, fallback[0], fallback[1], fallback[2], fallback[3]);
+  }
+
+  function createSolidTexture(gl, rgba) {
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      1,
+      1,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      new Uint8Array(rgba)
+    );
+
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+    return texture;
+  }
+
+  async function loadTexture(gl, url, fallbackTexture) {
+    if (!url) return { texture: fallbackTexture, loaded: false };
+
+    try {
+      const response = await fetch(url, { cache: "force-cache" });
+      if (!response.ok) throw new Error(`Texture HTTP ${response.status}`);
+
+      const bitmap = await createImageBitmap(await response.blob(), {
+        premultiplyAlpha: "none"
+      });
+
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, 1);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        bitmap
+      );
+
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+
       gl.generateMipmap(gl.TEXTURE_2D);
       bitmap.close?.();
-      return {texture:tex,loaded:true};
-    }catch{
-      return {texture:fallback,loaded:false};
+
+      return { texture, loaded: true };
+    } catch {
+      return { texture: fallbackTexture, loaded: false };
     }
-  }
-
-  function bindAttribute(gl,p,name,buffer,size,defaultValue) {
-    const loc=gl.getAttribLocation(p,name);
-    if(loc<0)return;
-    if(buffer){
-      gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
-      gl.enableVertexAttribArray(loc);
-      gl.vertexAttribPointer(loc,size,gl.FLOAT,false,0,0);
-    }else{
-      gl.disableVertexAttribArray(loc);
-      const v=defaultValue||[0,0,0,1];
-      if(size===2)gl.vertexAttrib2f(loc,v[0],v[1]);
-      else if(size===3)gl.vertexAttrib3f(loc,v[0],v[1],v[2]);
-      else gl.vertexAttrib4f(loc,v[0],v[1],v[2],v[3]);
-    }
-  }
-
-  function createBuffer(gl,data,target=gl.ARRAY_BUFFER) {
-    const b=gl.createBuffer();gl.bindBuffer(target,b);gl.bufferData(target,data,gl.STATIC_DRAW);return b;
-  }
-
-  function canvasBlob(canvas) {
-    return new Promise((resolve,reject)=>{
-      canvas.toBlob(b=>b?resolve(b):reject(new Error("PNG encoding failed.")),"image/png");
-    });
   }
 
   function alphaMode(mode) {
-    mode=String(mode||"").toLowerCase();
-    if(mode.includes("mask"))return 1;
-    if(mode.includes("blend")||mode.includes("transluc"))return 2;
+    const value = String(mode || "").toLowerCase();
+    if (value.includes("mask")) return 1;
+    if (value.includes("blend") || value.includes("transluc")) return 2;
     return 0;
   }
 
-  async function render(manifest, options={}) {
-    const g=manifest.geometry;
-    const positions=typed(g.positions,Float32Array);
-    const indices32=typed(g.indices,Uint32Array);
-    const vertexCount=positions.length/3;
-
-    const normals=g.normals ? typed(g.normals,Float32Array) : calculateNormals(positions,indices32);
-    const uv0=g.uv0 ? typed(g.uv0,Float32Array) : null;
-    const colors=g.colors ? typed(g.colors,Float32Array) : null;
-    const tangents=g.tangents ? typed(g.tangents,Float32Array) : null;
-
-    const outputSize = Math.max(512, Math.min(1024, Number(options.size)||(
-      vertexCount<100000?1024:vertexCount<280000?896:768
-    )));
-    const supersample = vertexCount<250000 ? 2 : 1;
-    const renderSize = Math.min(2048,outputSize*supersample);
-
-    const canvas=document.createElement("canvas");
-    canvas.width=renderSize;canvas.height=renderSize;
-
-    const gl=canvas.getContext("webgl2",{
-      alpha:true,antialias:true,depth:true,premultipliedAlpha:false,
-      preserveDrawingBuffer:true,powerPreference:"high-performance"
-    })||canvas.getContext("webgl",{
-      alpha:true,antialias:true,depth:true,premultipliedAlpha:false,
-      preserveDrawingBuffer:true
+  function canvasToBlob(canvas) {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => blob ? resolve(blob) : reject(new Error("PNG encoding failed.")),
+        "image/png"
+      );
     });
+  }
 
-    if(!gl)throw new Error("WebGL is unavailable.");
+  async function render(manifest, options = {}) {
+    if (!manifest?.geometry) throw new Error("NovaSparx manifest has no geometry.");
 
-    const isGL2=typeof WebGL2RenderingContext!=="undefined"&&gl instanceof WebGL2RenderingContext;
-    const uintOK=isGL2||Boolean(gl.getExtension("OES_element_index_uint"));
-    if(!uintOK&&vertexCount>65535){
-      throw new Error("This device cannot render this large StaticMesh.");
+    const geometry = manifest.geometry;
+
+    const positions = asTyped(geometry.positions, Float32Array);
+    const indices32 = asTyped(geometry.indices, Uint32Array);
+
+    const vertexCount = positions.length / 3;
+
+    const normals = geometry.normals
+      ? asTyped(geometry.normals, Float32Array)
+      : calculateNormals(positions, indices32);
+
+    const uv0 = geometry.uv0
+      ? asTyped(geometry.uv0, Float32Array)
+      : null;
+
+    const colors = geometry.colors
+      ? asTyped(geometry.colors, Float32Array)
+      : null;
+
+    const tangents = geometry.tangents
+      ? asTyped(geometry.tangents, Float32Array)
+      : null;
+
+    const requestedSize = Number(options.size) || (
+      vertexCount < 100000 ? 1024 :
+      vertexCount < 280000 ? 896 :
+      768
+    );
+
+    const size = Math.max(512, Math.min(1024, requestedSize));
+    const supersample = vertexCount < 240000 ? 2 : 1;
+    const renderSize = Math.min(2048, size * supersample);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = renderSize;
+    canvas.height = renderSize;
+
+    const gl =
+      canvas.getContext("webgl2", {
+        alpha: true,
+        antialias: true,
+        depth: true,
+        premultipliedAlpha: false,
+        preserveDrawingBuffer: true,
+        powerPreference: "high-performance"
+      }) ||
+      canvas.getContext("webgl", {
+        alpha: true,
+        antialias: true,
+        depth: true,
+        premultipliedAlpha: false,
+        preserveDrawingBuffer: true
+      });
+
+    if (!gl) throw new Error("WebGL is unavailable on this device.");
+
+    const isWebGL2 =
+      typeof WebGL2RenderingContext !== "undefined" &&
+      gl instanceof WebGL2RenderingContext;
+
+    const supportsUintIndices =
+      isWebGL2 || !!gl.getExtension("OES_element_index_uint");
+
+    if (!supportsUintIndices && vertexCount > 65535) {
+      throw new Error("This device cannot render this mesh because 32-bit indices are unavailable.");
     }
 
-    const indices=uintOK?indices32:new Uint16Array(indices32);
-    const indexType=uintOK?gl.UNSIGNED_INT:gl.UNSIGNED_SHORT;
-    const bytesPerIndex=uintOK?4:2;
+    const indices = supportsUintIndices ? indices32 : new Uint16Array(indices32);
+    const indexType = supportsUintIndices ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT;
+    const bytesPerIndex = supportsUintIndices ? 4 : 2;
 
-    const p=program(gl);
-    gl.useProgram(p);
+    const program = createProgram(gl);
+    gl.useProgram(program);
 
-    const posB=createBuffer(gl,positions);
-    const normB=createBuffer(gl,normals);
-    const uvB=uv0?createBuffer(gl,uv0):null;
-    const colB=colors?createBuffer(gl,colors):null;
-    const tanB=tangents?createBuffer(gl,tangents):null;
-    const idxB=createBuffer(gl,indices,gl.ELEMENT_ARRAY_BUFFER);
+    const positionBuffer = createBuffer(gl, positions);
+    const normalBuffer = createBuffer(gl, normals);
+    const uvBuffer = uv0 ? createBuffer(gl, uv0) : null;
+    const colorBuffer = colors ? createBuffer(gl, colors) : null;
+    const tangentBuffer = tangents ? createBuffer(gl, tangents) : null;
+    const indexBuffer = createBuffer(gl, indices, gl.ELEMENT_ARRAY_BUFFER);
 
-    bindAttribute(gl,p,"aPosition",posB,3,[0,0,0,1]);
-    bindAttribute(gl,p,"aNormal",normB,3,[0,0,1,1]);
-    bindAttribute(gl,p,"aUV",uvB,2,[0,0,0,1]);
-    bindAttribute(gl,p,"aColor",colB,4,[1,1,1,1]);
-    bindAttribute(gl,p,"aTangent",tanB,4,[1,0,0,1]);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,idxB);
+    setAttribute(gl, program, "aPosition", positionBuffer, 3, [0, 0, 0, 1]);
+    setAttribute(gl, program, "aNormal", normalBuffer, 3, [0, 0, 1, 1]);
+    setAttribute(gl, program, "aUV", uvBuffer, 2, [0, 0, 0, 1]);
+    setAttribute(gl, program, "aColor", colorBuffer, 4, [1, 1, 1, 1]);
+    setAttribute(gl, program, "aTangent", tangentBuffer, 4, [1, 0, 0, 1]);
 
-    const b=boundsOf(positions);
-    const model=mat4Multiply(mat4Scale(1/b.radius),mat4Translation(-b.cx,-b.cy,-b.cz));
-    const eye=chooseCamera(b);
-    const view=lookAt(eye,[0,0,0],[0,0,1]);
-    const projection=ortho(-1.10,1.10,-1.10,1.10,0.01,20);
-    const mvp=mat4Multiply(projection,mat4Multiply(view,model));
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 
-    gl.uniformMatrix4fv(gl.getUniformLocation(p,"uModel"),false,model);
-    gl.uniformMatrix4fv(gl.getUniformLocation(p,"uMVP"),false,mvp);
-    gl.uniform1i(gl.getUniformLocation(p,"uUseVertexColor"),Boolean(colors)?1:0);
+    const bounds = getBounds(positions);
+    const model = multiply(
+      uniformScale(1 / bounds.radius),
+      translation(-bounds.centerX, -bounds.centerY, -bounds.centerZ)
+    );
 
-    const white=solidTexture(gl,[255,255,255,255]);
-    const normalFlat=solidTexture(gl,[128,128,255,255]);
-    const black=solidTexture(gl,[0,0,0,255]);
+    const view = lookAt(chooseCamera(bounds), [0, 0, 0], [0, 0, 1]);
+    const projection = orthographic(-1.1, 1.1, -1.1, 1.1, 0.01, 20);
+    const mvp = multiply(projection, multiply(view, model));
 
-    const materials=manifest.materials?.length?manifest.materials:[{}];
-    const loadedMaterials=[];
+    gl.uniformMatrix4fv(gl.getUniformLocation(program, "uModel"), false, model);
+    gl.uniformMatrix4fv(gl.getUniformLocation(program, "uMVP"), false, mvp);
 
-    for(const m of materials){
-      const [base,normal,emissive,opacity]=await Promise.all([
-        imageTexture(gl,m.baseColorTexture,white),
-        imageTexture(gl,m.normalTexture,normalFlat),
-        imageTexture(gl,m.emissiveTexture,black),
-        imageTexture(gl,m.opacityTexture,white)
+    const white = createSolidTexture(gl, [255, 255, 255, 255]);
+    const flatNormal = createSolidTexture(gl, [128, 128, 255, 255]);
+    const black = createSolidTexture(gl, [0, 0, 0, 255]);
+
+    const materials = manifest.materials?.length
+      ? manifest.materials
+      : [{}];
+
+    const loadedMaterials = [];
+
+    for (const material of materials) {
+      const maps = await Promise.all([
+        loadTexture(gl, material.baseColorTexture, white),
+        loadTexture(gl, material.normalTexture, flatNormal),
+        loadTexture(gl, material.emissiveTexture, black),
+        loadTexture(gl, material.opacityTexture, white),
+        loadTexture(gl, material.packedTexture, white)
       ]);
-      loadedMaterials.push({m,base,normal,emissive,opacity});
+
+      loadedMaterials.push({ material, maps });
     }
 
-    const sections=manifest.sections?.length?manifest.sections:[{
-      firstIndex:0,indexCount:indices.length,materialIndex:0,name:""
-    }];
+    gl.viewport(0, 0, renderSize, renderSize);
 
-    gl.viewport(0,0,renderSize,renderSize);
-    const bg=Array.isArray(options.background)?options.background:DEFAULT_BG;
-    gl.clearColor(bg[0]||0,bg[1]||0,bg[2]||0,bg[3]||0);
+    const background = options.background || TRANSPARENT;
+    gl.clearColor(...background);
     gl.clearDepth(1);
+
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
+
     gl.disable(gl.CULL_FACE);
+
     gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
-    gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-    for(const s of sections){
-      const lm=loadedMaterials[Math.min(s.materialIndex,loadedMaterials.length-1)]||loadedMaterials[0];
-      const m=lm.m||{};
-      const base=Array.isArray(m.baseColor)?m.baseColor:[1,1,1,1];
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-      gl.uniform4f(gl.getUniformLocation(p,"uBaseColor"),
-        Number(base[0]??1),Number(base[1]??1),Number(base[2]??1),Number(base[3]??1));
-      gl.uniform1f(gl.getUniformLocation(p,"uRoughness"),Number(m.roughness??0.62));
-      gl.uniform1f(gl.getUniformLocation(p,"uMetallic"),Number(m.metallic??0));
-      gl.uniform1f(gl.getUniformLocation(p,"uOpacity"),Number(m.opacity??1));
-      gl.uniform1f(gl.getUniformLocation(p,"uOpacityCutoff"),Number(m.opacityCutoff??0.333));
-      gl.uniform1i(gl.getUniformLocation(p,"uAlphaMode"),alphaMode(m.opacityMode));
-      gl.uniform2f(gl.getUniformLocation(p,"uUVScale"),...(m.uvScale||[1,1]));
-      gl.uniform2f(gl.getUniformLocation(p,"uUVOffset"),...(m.uvOffset||[0,0]));
+    const sections = manifest.sections?.length
+      ? manifest.sections
+      : [{
+          firstIndex: 0,
+          indexCount: indices.length,
+          materialIndex: 0
+        }];
 
-      const texList=[
-        ["uBaseMap","uHasBaseMap",lm.base,0,Boolean(uv0&&lm.base.loaded)],
-        ["uNormalMap","uHasNormalMap",lm.normal,1,Boolean(uv0&&tangents&&lm.normal.loaded)],
-        ["uEmissiveMap","uHasEmissiveMap",lm.emissive,2,Boolean(uv0&&lm.emissive.loaded)],
-        ["uOpacityMap","uHasOpacityMap",lm.opacity,3,Boolean(uv0&&lm.opacity.loaded)]
+    for (const section of sections) {
+      const loaded =
+        loadedMaterials[Math.min(section.materialIndex || 0, loadedMaterials.length - 1)] ||
+        loadedMaterials[0];
+
+      const material = loaded.material || {};
+      const baseColor = material.baseColor || [1, 1, 1, 1];
+      const emissiveColor = material.emissiveColor || [0, 0, 0, 1];
+
+      gl.uniform4f(
+        gl.getUniformLocation(program, "uBaseColor"),
+        ...baseColor
+      );
+
+      gl.uniform4f(
+        gl.getUniformLocation(program, "uEmissiveColor"),
+        ...emissiveColor
+      );
+
+      gl.uniform1f(
+        gl.getUniformLocation(program, "uRoughness"),
+        Number(material.roughness ?? 0.62)
+      );
+
+      gl.uniform1f(
+        gl.getUniformLocation(program, "uMetallic"),
+        Number(material.metallic ?? 0)
+      );
+
+      gl.uniform1f(
+        gl.getUniformLocation(program, "uSpecular"),
+        Number(material.specular ?? 0.5)
+      );
+
+      gl.uniform1f(
+        gl.getUniformLocation(program, "uOpacity"),
+        Number(material.opacity ?? 1)
+      );
+
+      gl.uniform1f(
+        gl.getUniformLocation(program, "uCutoff"),
+        Number(material.opacityCutoff ?? 0.333)
+      );
+
+      gl.uniform1i(
+        gl.getUniformLocation(program, "uAlphaMode"),
+        alphaMode(material.opacityMode)
+      );
+
+      gl.uniform1i(
+        gl.getUniformLocation(program, "uUseVertexColor"),
+        colors && material.useVertexColor ? 1 : 0
+      );
+
+      const uvScale = material.uvScale || [1, 1];
+      const uvOffset = material.uvOffset || [0, 0];
+
+      gl.uniform2f(
+        gl.getUniformLocation(program, "uUVScale"),
+        Number(uvScale[0] ?? 1),
+        Number(uvScale[1] ?? 1)
+      );
+
+      gl.uniform2f(
+        gl.getUniformLocation(program, "uUVOffset"),
+        Number(uvOffset[0] ?? 0),
+        Number(uvOffset[1] ?? 0)
+      );
+
+      const textureBindings = [
+        ["uBaseMap", "uHasBase", 0, !!(uv0 && loaded.maps[0].loaded)],
+        ["uNormalMap", "uHasNormal", 1, !!(uv0 && tangents && loaded.maps[1].loaded)],
+        ["uEmissiveMap", "uHasEmissive", 2, !!(uv0 && loaded.maps[2].loaded)],
+        ["uOpacityMap", "uHasOpacity", 3, !!(uv0 && loaded.maps[3].loaded)],
+        ["uPackedMap", "uHasPacked", 4, !!(uv0 && loaded.maps[4].loaded)]
       ];
 
-      for(const [sampler,flag,obj,unit,enabled] of texList){
-        gl.activeTexture(gl.TEXTURE0+unit);
-        gl.bindTexture(gl.TEXTURE_2D,obj.texture);
-        gl.uniform1i(gl.getUniformLocation(p,sampler),unit);
-        gl.uniform1i(gl.getUniformLocation(p,flag),enabled?1:0);
-      }
+      textureBindings.forEach(([samplerName, flagName, unit, enabled]) => {
+        gl.activeTexture(gl.TEXTURE0 + unit);
+        gl.bindTexture(gl.TEXTURE_2D, loaded.maps[unit].texture);
+        gl.uniform1i(gl.getUniformLocation(program, samplerName), unit);
+        gl.uniform1i(gl.getUniformLocation(program, flagName), enabled ? 1 : 0);
+      });
 
-      const first=Math.max(0,Math.min(indices.length,Number(s.firstIndex)||0));
-      let count=Math.max(0,Math.min(indices.length-first,Number(s.indexCount)||0));
-      count-=count%3;
-      if(count>0)gl.drawElements(gl.TRIANGLES,count,indexType,first*bytesPerIndex);
+      gl.uniform1i(
+        gl.getUniformLocation(program, "uAOChannel"),
+        Number(material.packedChannels?.ao ?? -1)
+      );
+
+      gl.uniform1i(
+        gl.getUniformLocation(program, "uRoughnessChannel"),
+        Number(material.packedChannels?.roughness ?? -1)
+      );
+
+      gl.uniform1i(
+        gl.getUniformLocation(program, "uMetallicChannel"),
+        Number(material.packedChannels?.metallic ?? -1)
+      );
+
+      const firstIndex = Math.max(
+        0,
+        Math.min(indices.length, Number(section.firstIndex) || 0)
+      );
+
+      let count = Math.max(
+        0,
+        Math.min(
+          indices.length - firstIndex,
+          Number(section.indexCount) || 0
+        )
+      );
+
+      count -= count % 3;
+
+      if (count > 0) {
+        gl.drawElements(
+          gl.TRIANGLES,
+          count,
+          indexType,
+          firstIndex * bytesPerIndex
+        );
+      }
     }
 
     gl.finish();
 
-    let finalCanvas=canvas;
-    if(renderSize!==outputSize){
-      finalCanvas=document.createElement("canvas");
-      finalCanvas.width=outputSize;finalCanvas.height=outputSize;
-      const ctx=finalCanvas.getContext("2d",{alpha:true});
-      if(!ctx)throw new Error("High quality canvas is unavailable.");
-      ctx.imageSmoothingEnabled=true;
-      ctx.imageSmoothingQuality="high";
-      ctx.clearRect(0,0,outputSize,outputSize);
-      ctx.drawImage(canvas,0,0,outputSize,outputSize);
+    let outputCanvas = canvas;
+
+    if (renderSize !== size) {
+      outputCanvas = document.createElement("canvas");
+      outputCanvas.width = size;
+      outputCanvas.height = size;
+
+      const context = outputCanvas.getContext("2d", { alpha: true });
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+      context.drawImage(canvas, 0, 0, size, size);
     }
 
-    const blob=await canvasBlob(finalCanvas);
+    const blob = await canvasToBlob(outputCanvas);
 
-    for(const lm of loadedMaterials){
-      for(const item of [lm.base,lm.normal,lm.emissive,lm.opacity]){
-        if(item.loaded&&item.texture)gl.deleteTexture(item.texture);
+    const textured = loadedMaterials.some((item) => item.maps[0].loaded);
+    const normalMapped = loadedMaterials.some((item) => item.maps[1].loaded);
+
+    for (const item of loadedMaterials) {
+      for (const map of item.maps) {
+        if (map.loaded) gl.deleteTexture(map.texture);
       }
     }
-    gl.deleteTexture(white);gl.deleteTexture(normalFlat);gl.deleteTexture(black);
-    for(const bfr of [posB,normB,uvB,colB,tanB,idxB])if(bfr)gl.deleteBuffer(bfr);
-    gl.deleteProgram(p);
+
+    gl.deleteTexture(white);
+    gl.deleteTexture(flatNormal);
+    gl.deleteTexture(black);
+
+    for (const buffer of [
+      positionBuffer,
+      normalBuffer,
+      uvBuffer,
+      colorBuffer,
+      tangentBuffer,
+      indexBuffer
+    ]) {
+      if (buffer) gl.deleteBuffer(buffer);
+    }
+
+    gl.deleteProgram(program);
 
     return {
       blob,
-      width:outputSize,
-      height:outputSize,
-      renderSize,
+      width: size,
+      height: size,
       vertexCount,
-      triangleCount:indices.length/3,
-      materialCount:materials.length,
-      textured:Boolean(uv0&&loadedMaterials.some(x=>x.base.loaded)),
-      normalMapped:Boolean(uv0&&tangents&&loadedMaterials.some(x=>x.normal.loaded)),
-      bounds:b
+      triangleCount: indices.length / 3,
+      materialCount: materials.length,
+      textured,
+      normalMapped,
+      bounds,
+      materialFidelity: manifest.metadata?.materialFidelity || "unknown"
     };
   }
 
-  window.NovaSparxRenderer=Object.freeze({
-    version:"0.1.0-alpha",
+  window.NovaSparxRenderer = Object.freeze({
+    version: "1.0.0",
     render
   });
-
-  console.info("NovaSparx Renderer 0.1 alpha loaded.");
 })();
