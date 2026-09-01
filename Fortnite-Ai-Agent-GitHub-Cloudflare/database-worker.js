@@ -1,11 +1,21 @@
 let manifestCache = null;
+
 const textCache = new Map();
 const resultCache = new Map();
 
-const RESULT_CACHE_LIMIT = 40;
-const TEXT_CACHE_LIMIT = 48;
+const RESULT_CACHE_LIMIT = 24;
+const TEXT_CACHE_LIMIT = 12;
 const DEFAULT_LIMIT = 80;
 const MAX_RESULT_SET = 1200;
+
+// Never inflate a giant "all assets" index inside a phone Web Worker.
+// The current all.txt.gz is ~14 MB compressed / ~1.78M lines and can expand
+// into a very large JS string + array, which can get the worker killed on iOS.
+const MAX_SAFE_FULL_GZIP_BYTES = 2 * 1024 * 1024;
+
+// For multi-token searches, probe a few filename shards instead of falling
+// straight back to the full database.
+const MAX_QUERY_SHARDS = 4;
 
 self.addEventListener("message", async (event) => {
   const msg = event.data || {};
@@ -58,47 +68,79 @@ async function search(scope, query, config) {
   }
 
   const manifest = await loadManifest(config);
-  const primaryKey = shardKey(tokens[0]);
-
-  const candidates = [];
-  let source = "shard";
 
   const scopeManifest =
     manifest?.scopes?.[cleanScope] || null;
 
-  if (scopeManifest?.shards?.[primaryKey]?.path) {
+  const shardKeys = [
+    ...new Set(
+      tokens
+        .map(shardKey)
+        .filter(Boolean)
+    )
+  ].slice(0, MAX_QUERY_SHARDS);
+
+  const primaryKey =
+    shardKeys[0] || "__";
+
+  const candidateSet = new Set();
+  let source = "shard";
+
+  // Probe shards for multiple query tokens. This is much safer than inflating
+  // the full 1.78M-line database when the first shard is narrow.
+  for (const key of shardKeys) {
+    const relative =
+      scopeManifest?.shards?.[key]?.path;
+
+    if (!relative) continue;
+
     const shardPath =
       resolveDatabasePath(
         config,
-        scopeManifest.shards[primaryKey].path
+        relative
       );
 
-    candidates.push(
-      ...(await loadGzipLines(shardPath))
-    );
-  }
-
-  // If the first token lands in an empty or overly narrow shard, use a full
-  // scope fallback. This keeps multi-token/path-fragment searches reliable.
-  if (candidates.length < 24) {
-    const fullPath =
-      scopeManifest?.full?.path
-        ? resolveDatabasePath(
-            config,
-            scopeManifest.full.path
-          )
-        : legacyScopeUrl(cleanScope, config);
-
-    if (fullPath) {
-      source = "full";
-      candidates.push(
-        ...(await loadGzipLines(fullPath))
+    const lines =
+      await loadGzipLines(
+        shardPath
       );
+
+    for (const line of lines) {
+      candidateSet.add(line);
     }
   }
 
-  // JSON references are useful for meshes/materials, but should not outrank a
-  // direct asset hit unless their textual match is genuinely stronger.
+  // Full-index fallback is allowed only when the compressed file is small.
+  // This keeps SM/material/new searches broad while protecting iPhone/WebKit
+  // from the huge "all" index.
+  if (candidateSet.size < 24) {
+    const fallback =
+      safeFullFallback(
+        cleanScope,
+        scopeManifest,
+        config
+      );
+
+    if (fallback) {
+      source = "full-safe";
+
+      const lines =
+        await loadGzipLines(
+          fallback
+        );
+
+      for (const line of lines) {
+        candidateSet.add(line);
+      }
+    } else if (candidateSet.size === 0) {
+      source = "shard-only";
+    }
+  }
+
+  const candidates =
+    [...candidateSet];
+
+  // JSON references are optional evidence only.
   const jsonCandidates = [];
 
   if (
@@ -147,11 +189,51 @@ async function search(scope, query, config) {
     makeFile: allResults.length >= 120,
     source,
     scope: cleanScope,
-    shard: primaryKey
+    shard: primaryKey,
+    shards: shardKeys
   };
 
   rememberResult(cacheKey, payload);
+
   return payload;
+}
+
+function safeFullFallback(
+  scope,
+  scopeManifest,
+  config
+) {
+  const full =
+    scopeManifest?.full || null;
+
+  if (full?.path) {
+    const bytes =
+      Number(full.bytes || 0);
+
+    if (
+      bytes > 0 &&
+      bytes <= MAX_SAFE_FULL_GZIP_BYTES
+    ) {
+      return resolveDatabasePath(
+        config,
+        full.path
+      );
+    }
+
+    // Manifest explicitly tells us this full file is too large.
+    return "";
+  }
+
+  // During an incomplete deployment the manifest may be unavailable.
+  // Never fall back to the legacy "all" index because it is the dangerous one.
+  if (scope === "all") {
+    return "";
+  }
+
+  return legacyScopeUrl(
+    scope,
+    config
+  );
 }
 
 function rankCandidates(
@@ -199,14 +281,17 @@ function scoreCollection(
   bestByPath
 ) {
   for (const rawPath of paths) {
-    const path = String(rawPath || "").trim();
+    const path =
+      String(rawPath || "").trim();
+
     if (!path) continue;
 
-    const scored = scorePath(
-      path,
-      tokens,
-      scope
-    );
+    const scored =
+      scorePath(
+        path,
+        tokens,
+        scope
+      );
 
     if (!scored.matched) continue;
 
@@ -218,8 +303,11 @@ function scoreCollection(
       match: scored.match
     };
 
-    const key = path.toLowerCase();
-    const previous = bestByPath.get(key);
+    const key =
+      path.toLowerCase();
+
+    const previous =
+      bestByPath.get(key);
 
     if (
       !previous ||
@@ -229,28 +317,44 @@ function scoreCollection(
         item.score > previous.score
       )
     ) {
-      bestByPath.set(key, item);
+      bestByPath.set(
+        key,
+        item
+      );
     }
   }
 }
 
-function scorePath(path, tokens, scope) {
-  const lower = path.toLowerCase();
-  const file = basename(lower);
-  const logical = logicalName(file);
-  const words = wordify(logical);
+function scorePath(
+  path,
+  tokens,
+  scope
+) {
+  const lower =
+    path.toLowerCase();
 
-  let score = scopeBonus(
-    file,
-    lower,
-    scope
-  );
+  const file =
+    basename(lower);
+
+  const logical =
+    logicalName(file);
+
+  const words =
+    wordify(logical);
+
+  let score =
+    scopeBonus(
+      file,
+      lower,
+      scope
+    );
 
   let matched = 0;
   let exactTokenMatches = 0;
 
   for (const token of tokens) {
-    const tokenLower = token.toLowerCase();
+    const tokenLower =
+      token.toLowerCase();
 
     const inPath =
       lower.includes(tokenLower);
@@ -268,10 +372,25 @@ function scorePath(path, tokens, scope) {
 
     matched++;
 
-    if (inPath) score += tokenLower.length * 4;
-    if (inFile) score += tokenLower.length * 12;
-    if (inLogical) score += tokenLower.length * 16;
-    if (inWords) score += tokenLower.length * 18;
+    if (inPath) {
+      score +=
+        tokenLower.length * 4;
+    }
+
+    if (inFile) {
+      score +=
+        tokenLower.length * 12;
+    }
+
+    if (inLogical) {
+      score +=
+        tokenLower.length * 16;
+    }
+
+    if (inWords) {
+      score +=
+        tokenLower.length * 18;
+    }
 
     if (
       file === tokenLower ||
@@ -286,15 +405,20 @@ function scorePath(path, tokens, scope) {
     ) {
       score += 850;
     } else if (
-      wordStartsWith(words, tokenLower)
+      wordStartsWith(
+        words,
+        tokenLower
+      )
     ) {
       score += 500;
     }
   }
 
   if (!matched) {
-    // Tiny fuzzy pass for typos on a single reasonably long token.
-    if (tokens.length === 1 && tokens[0].length >= 4) {
+    if (
+      tokens.length === 1 &&
+      tokens[0].length >= 4
+    ) {
       const distance =
         boundedLevenshtein(
           logical,
@@ -305,7 +429,9 @@ function scorePath(path, tokens, scope) {
       if (distance <= 2) {
         return {
           matched: 1,
-          score: 280 - distance * 80,
+          score:
+            280 -
+            distance * 80,
           match: "fuzzy"
         };
       }
@@ -318,15 +444,21 @@ function scorePath(path, tokens, scope) {
     };
   }
 
-  if (tokens.every((token) =>
-    file.includes(token)
-  )) {
+  if (
+    tokens.every(
+      (token) =>
+        file.includes(token)
+    )
+  ) {
     score += 1000;
   }
 
-  if (tokens.every((token) =>
-    lower.includes(token)
-  )) {
+  if (
+    tokens.every(
+      (token) =>
+        lower.includes(token)
+    )
+  ) {
     score += 450;
   }
 
@@ -351,9 +483,16 @@ function scorePath(path, tokens, scope) {
   };
 }
 
-function scopeBonus(file, path, scope) {
+function scopeBonus(
+  file,
+  path,
+  scope
+) {
   if (scope === "sm") {
-    if (file.startsWith("sm_")) return 1200;
+    if (file.startsWith("sm_")) {
+      return 1200;
+    }
+
     if (
       path.includes("/staticmesh/") ||
       path.includes("/staticmeshes/")
@@ -365,15 +504,29 @@ function scopeBonus(file, path, scope) {
   }
 
   if (scope === "m") {
-    if (file.startsWith("mi_")) return 1200;
-    if (file.startsWith("m_")) return 1150;
-    if (path.includes("/material")) return 400;
+    if (file.startsWith("mi_")) {
+      return 1200;
+    }
+
+    if (file.startsWith("m_")) {
+      return 1150;
+    }
+
+    if (path.includes("/material")) {
+      return 400;
+    }
+
     return -250;
   }
 
   if (scope === "meshes") {
-    if (file.startsWith("sm_")) return 1200;
-    if (file.startsWith("sk_")) return 1150;
+    if (file.startsWith("sm_")) {
+      return 1200;
+    }
+
+    if (file.startsWith("sk_")) {
+      return 1150;
+    }
 
     if (
       path.includes("/mesh/") ||
@@ -417,7 +570,7 @@ function tokenize(value) {
       String(value || "")
         .toLowerCase()
         .replace(
-          /[\\`*_~()[\]{}<>|:;,.!?'\"=+]/g,
+          /[\\`*_~()[\]{}<>|:;,.!?'"=+]/g,
           " "
         )
         .split(/\s+/)
@@ -451,11 +604,15 @@ function logicalName(file) {
         ""
       );
 
-  const dot = name.indexOf(".");
+  const dot =
+    name.indexOf(".");
 
   if (dot >= 0) {
-    const left = name.slice(0, dot);
-    const right = name.slice(dot + 1);
+    const left =
+      name.slice(0, dot);
+
+    const right =
+      name.slice(dot + 1);
 
     if (
       right === left ||
@@ -476,31 +633,44 @@ function logicalName(file) {
 function wordify(value) {
   return String(value || "")
     .replace(/[_\-.]+/g, " ")
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(
+      /([a-z0-9])([A-Z])/g,
+      "$1 $2"
+    )
     .toLowerCase()
     .trim();
 }
 
-function wordStartsWith(words, token) {
+function wordStartsWith(
+  words,
+  token
+) {
   return words
     .split(/\s+/)
-    .some((word) =>
-      word.startsWith(token)
+    .some(
+      (word) =>
+        word.startsWith(token)
     );
 }
 
 function shardKey(queryToken) {
   const logical =
-    logicalName(String(queryToken || ""));
+    logicalName(
+      String(queryToken || "")
+    );
 
   const compact =
     [...logical]
-      .filter((ch) =>
-        /[a-z0-9]/.test(ch)
+      .filter(
+        (ch) =>
+          /[a-z0-9]/.test(ch)
       )
       .join("");
 
-  if (!compact) return "__";
+  if (!compact) {
+    return "__";
+  }
+
   if (compact.length === 1) {
     return `${compact}_`;
   }
@@ -509,20 +679,21 @@ function shardKey(queryToken) {
 }
 
 async function loadManifest(config) {
-  if (manifestCache) return manifestCache;
+  if (manifestCache) {
+    return manifestCache;
+  }
 
   const url =
     config.manifest ||
     "./database/index-v1/manifest.json";
 
-  const response = await fetch(
-    url,
-    { cache: "force-cache" }
-  );
+  const response =
+    await fetch(
+      url,
+      { cache: "force-cache" }
+    );
 
   if (!response.ok) {
-    // Index-v1 may not have been generated yet. Search can still fall back to
-    // legacy indexes during deployment.
     manifestCache = {};
     return manifestCache;
   }
@@ -533,8 +704,12 @@ async function loadManifest(config) {
   return manifestCache;
 }
 
-function resolveDatabasePath(config, relative) {
-  const value = String(relative || "");
+function resolveDatabasePath(
+  config,
+  relative
+) {
+  const value =
+    String(relative || "");
 
   if (
     /^https?:\/\//i.test(value) ||
@@ -548,7 +723,10 @@ function resolveDatabasePath(config, relative) {
   return `./database/index-v1/${value}`;
 }
 
-function legacyScopeUrl(scope, config) {
+function legacyScopeUrl(
+  scope,
+  config
+) {
   const map = {
     all:
       config.all ||
@@ -575,18 +753,28 @@ function legacyScopeUrl(scope, config) {
 }
 
 async function loadGzipLines(url) {
-  if (!url) return [];
+  if (!url) {
+    return [];
+  }
 
   if (textCache.has(url)) {
-    const cached = textCache.get(url);
-    touchMap(textCache, url, cached);
+    const cached =
+      textCache.get(url);
+
+    touchMap(
+      textCache,
+      url,
+      cached
+    );
+
     return cached;
   }
 
-  const response = await fetch(
-    url,
-    { cache: "force-cache" }
-  );
+  const response =
+    await fetch(
+      url,
+      { cache: "force-cache" }
+    );
 
   if (!response.ok) {
     throw new Error(
@@ -594,26 +782,35 @@ async function loadGzipLines(url) {
     );
   }
 
-  const buffer =
-    await response.arrayBuffer();
+  if (
+    typeof DecompressionStream !==
+    "function"
+  ) {
+    try {
+      await response.body?.cancel();
+    } catch {}
 
-  let text;
-
-  if (typeof DecompressionStream === "function") {
-    const stream =
-      new Blob([buffer])
-        .stream()
-        .pipeThrough(
-          new DecompressionStream("gzip")
-        );
-
-    text =
-      await new Response(stream).text();
-  } else {
     throw new Error(
       "This browser doesn't support gzip decompression."
     );
   }
+
+  if (!response.body) {
+    throw new Error(
+      "Database response body is unavailable."
+    );
+  }
+
+  // Stream directly from fetch -> gzip decoder.
+  // Do not create arrayBuffer + Blob copies of the compressed database.
+  const stream =
+    response.body.pipeThrough(
+      new DecompressionStream("gzip")
+    );
+
+  const text =
+    await new Response(stream)
+      .text();
 
   const lines =
     text
@@ -621,21 +818,34 @@ async function loadGzipLines(url) {
       .map((x) => x.trim())
       .filter(Boolean);
 
-  textCache.set(url, lines);
+  // Small shards / small scope indexes are safe to retain.
+  // Avoid pinning unusually huge arrays in the worker heap.
+  if (lines.length <= 250_000) {
+    textCache.set(
+      url,
+      lines
+    );
 
-  while (
-    textCache.size > TEXT_CACHE_LIMIT
-  ) {
-    const oldest =
-      textCache.keys().next().value;
+    while (
+      textCache.size >
+      TEXT_CACHE_LIMIT
+    ) {
+      const oldest =
+        textCache.keys()
+          .next()
+          .value;
 
-    textCache.delete(oldest);
+      textCache.delete(oldest);
+    }
   }
 
   return lines;
 }
 
-function rememberResult(key, value) {
+function rememberResult(
+  key,
+  value
+) {
   touchMap(
     resultCache,
     key,
@@ -643,57 +853,100 @@ function rememberResult(key, value) {
   );
 
   while (
-    resultCache.size > RESULT_CACHE_LIMIT
+    resultCache.size >
+    RESULT_CACHE_LIMIT
   ) {
     const oldest =
-      resultCache.keys().next().value;
+      resultCache.keys()
+        .next()
+        .value;
 
     resultCache.delete(oldest);
   }
 }
 
-function touchMap(map, key, value) {
+function touchMap(
+  map,
+  key,
+  value
+) {
   if (map.has(key)) {
     map.delete(key);
   }
 
-  map.set(key, value);
+  map.set(
+    key,
+    value
+  );
 }
 
-function boundedLevenshtein(a, b, maxDistance) {
-  if (Math.abs(a.length - b.length) > maxDistance) {
+function boundedLevenshtein(
+  a,
+  b,
+  maxDistance
+) {
+  if (
+    Math.abs(
+      a.length -
+      b.length
+    ) >
+    maxDistance
+  ) {
     return maxDistance + 1;
   }
 
-  if (!a.length) return b.length;
-  if (!b.length) return a.length;
+  if (!a.length) {
+    return b.length;
+  }
+
+  if (!b.length) {
+    return a.length;
+  }
 
   const previous =
-    new Array(b.length + 1);
+    new Array(
+      b.length + 1
+    );
 
   const current =
-    new Array(b.length + 1);
+    new Array(
+      b.length + 1
+    );
 
-  for (let j = 0; j <= b.length; j++) {
+  for (
+    let j = 0;
+    j <= b.length;
+    j++
+  ) {
     previous[j] = j;
   }
 
-  for (let i = 1; i <= a.length; i++) {
+  for (
+    let i = 1;
+    i <= a.length;
+    i++
+  ) {
     current[0] = i;
 
-    let rowMin = current[0];
+    let rowMin =
+      current[0];
 
-    for (let j = 1; j <= b.length; j++) {
+    for (
+      let j = 1;
+      j <= b.length;
+      j++
+    ) {
       const cost =
         a[i - 1] === b[j - 1]
           ? 0
           : 1;
 
-      current[j] = Math.min(
-        current[j - 1] + 1,
-        previous[j] + 1,
-        previous[j - 1] + cost
-      );
+      current[j] =
+        Math.min(
+          current[j - 1] + 1,
+          previous[j] + 1,
+          previous[j - 1] + cost
+        );
 
       rowMin =
         Math.min(
@@ -702,12 +955,20 @@ function boundedLevenshtein(a, b, maxDistance) {
         );
     }
 
-    if (rowMin > maxDistance) {
+    if (
+      rowMin >
+      maxDistance
+    ) {
       return maxDistance + 1;
     }
 
-    for (let j = 0; j <= b.length; j++) {
-      previous[j] = current[j];
+    for (
+      let j = 0;
+      j <= b.length;
+      j++
+    ) {
+      previous[j] =
+        current[j];
     }
   }
 
