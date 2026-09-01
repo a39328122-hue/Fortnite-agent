@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import gzip
+import io
 import hashlib
 import json
 import os
@@ -86,25 +87,17 @@ def gzip_bytes(lines: Iterable[str]) -> bytes:
 
     # mtime=0 keeps generated files deterministic, which means hashes only
     # change when the index contents actually change.
-    out = bytearray()
-
-    class Buffer:
-        def write(self, data: bytes) -> int:
-            out.extend(data)
-            return len(data)
-
-        def flush(self) -> None:
-            pass
+    out = io.BytesIO()
 
     with gzip.GzipFile(
-        fileobj=Buffer(),
+        fileobj=out,
         mode="wb",
         compresslevel=9,
         mtime=0,
     ) as gz:
         gz.write(payload)
 
-    return bytes(out)
+    return out.getvalue()
 
 
 def write_gzip_lines(path: Path, lines: Iterable[str]) -> dict:
@@ -347,16 +340,15 @@ def build_legacy_indexes(
             ),
         }
 
-    if scopes["new"]:
-        relative = Path("index") / "new.txt.gz"
+    relative = Path("index") / "new.txt.gz"
 
-        legacy["new"] = {
-            "path": relative.as_posix(),
-            **write_gzip_lines(
-                DB / relative,
-                scopes["new"],
-            ),
-        }
+    legacy["new"] = {
+        "path": relative.as_posix(),
+        **write_gzip_lines(
+            DB / relative,
+            scopes["new"],
+        ),
+    }
 
     relative = Path("index") / "json-references.txt.gz"
 
