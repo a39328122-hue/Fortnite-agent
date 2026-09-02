@@ -2,10 +2,11 @@
   "use strict";
 
   const API_ENDPOINT = String(window.FORTNITE_AI_API_ENDPOINT || "").trim().replace(/\/+$/, "");
+  const SITE_BASE_PATH = String(window.FNAA_CONFIG?.siteBasePath || "/Fortnite-agent/");
   const SESSION_KEY = "fortniteAiAgent.openrouterSession.v3";
   const LOGIN_PENDING_KEY = "fortniteAiAgent.openrouterLoginPending.v3";
   const PROFILE_PREFIX = "fortniteAiAgent.openrouterProfile.v3.";
-  const DEFAULT_AVATAR = "./assets/default-user-avatar.jpeg";
+  const DEFAULT_AVATAR = `${SITE_BASE_PATH}assets/default-user-avatar.jpeg`;
   const MAX_USERNAME_CHARS = 9;
   const MAX_AVATAR_DATA_URL = 180000;
 
@@ -258,7 +259,9 @@
   async function signInOpenRouter() {
     if (!configured) throw new Error("LOGIN_UNAVAILABLE");
 
-    const returnTo = `${location.origin}${location.pathname}`;
+    // OAuth always returns to the stable app root. The SPA restores its own
+    // route afterwards, while the callback fragment remains visible to boot().
+    const returnTo = new URL(SITE_BASE_PATH, location.origin).toString();
     const url = new URL(`${API_ENDPOINT}/auth/openrouter/start`);
     url.searchParams.set("return_to", returnTo);
 
