@@ -559,22 +559,39 @@
             );
           }
 
-          const response =
-            await fetch(
-              `${API}${route}?${query.toString()}`,
-              {
-                cache:
-                  options.noCache
-                    ? "no-store"
-                    : "force-cache",
-                headers: {
-                  Accept:
-                    "application/json",
-                  "X-FNAA-Client":
-                    "web-v101"
-                }
-              }
+          const controller =
+            new AbortController();
+
+          const timer =
+            setTimeout(
+              () => controller.abort(),
+              30_000
             );
+
+          let response;
+
+          try {
+            response =
+              await fetch(
+                `${API}${route}?${query.toString()}`,
+                {
+                  cache:
+                    options.noCache
+                      ? "no-store"
+                      : "force-cache",
+                  headers: {
+                    Accept:
+                      "application/json",
+                    "X-FNAA-Client":
+                      "web-v1"
+                  },
+                  signal:
+                    controller.signal
+                }
+              );
+          } finally {
+            clearTimeout(timer);
+          }
 
           const data =
             await response
@@ -1393,14 +1410,10 @@
 
   ensureBase();
   normalizeImages();
-  syncPathModifierLabel();
-  normalizeAssetActionLabels();
-  installToolToggleFix();
-  installCosmeticOverride();
+  // v1.0.2 owns tool toggles, cosmetics and labels inside tools.js. Keeping
+  // those old interception patches enabled causes duplicate requests.
   patchNovaSparx();
   patchAuth();
-  warmStaticData();
-  installObserver();
   installGlitchPulse();
   syncAccountMode();
 
@@ -1418,7 +1431,6 @@
     "pageshow",
     () => {
       normalizeImages();
-      syncPathModifierLabel();
       syncAccountMode();
     }
   );
