@@ -436,6 +436,11 @@
 
     ui.panel.hidden = false;
 
+    if (ui.stage) {
+      delete ui.stage.dataset
+        .previewState;
+    }
+
     ui.image.hidden = true;
 
     ui.image.removeAttribute(
@@ -451,6 +456,57 @@
       ui.meta,
       ""
     );
+  }
+
+  async function tryKnownCatalogImage(
+    path,
+    ui
+  ) {
+    if (
+      !window.FortniteTools
+        ?.findKnownImage
+    ) {
+      return false;
+    }
+
+    setStatus(
+      ui.status,
+      "Checking the verified FNAA / Th3Dry image catalogue…"
+    );
+
+    const url =
+      await window.FortniteTools
+        .findKnownImage(path);
+
+    if (!url) {
+      return false;
+    }
+
+    const ok =
+      await loadImage(
+        ui.image,
+        url,
+        10_000
+      );
+
+    if (!ok) {
+      ui.image.removeAttribute(
+        "src"
+      );
+
+      return false;
+    }
+
+    ui.image.hidden = false;
+    ui.status.hidden = true;
+
+    setMeta(
+      ui.meta,
+      "Verified catalogue image • Th3Dry / FNAA",
+      "high"
+    );
+
+    return true;
   }
 
   async function renderNovaMesh(
@@ -719,6 +775,148 @@
     return true;
   }
 
+  function readableAssetKind(
+    info,
+    path
+  ) {
+    const type =
+      assetType(
+        info,
+        path
+      );
+
+    const lower =
+      `${type} ${path}`
+        .toLowerCase();
+
+    const choices = [
+      [
+        /skeletalmesh|\/characters\/|\bcid_/,
+        "character / skeletal asset"
+      ],
+      [
+        /staticmesh|\/meshes\/|\bsm_/,
+        "static mesh asset"
+      ],
+      [
+        /materialinstance|material|\bmi_|\bm_/,
+        "material asset"
+      ],
+      [
+        /texture2d|texture|\btex_|\bt_/,
+        "texture asset"
+      ],
+      [
+        /niagara|particle|effect|vfx|\bns_|\bps_|\bfx_/,
+        "VFX asset"
+      ],
+      [
+        /danc|emote|\beid_/,
+        "emote asset"
+      ],
+      [
+        /backpack|backbling|back_bling|\bbid_/,
+        "back bling asset"
+      ],
+      [
+        /playset|playground|island|\bpid_/,
+        "Creative island / playset asset"
+      ],
+      [
+        /device|\/crd_|creative_device/,
+        "Creative device asset"
+      ],
+      [
+        /sound|audio|music|\busw_|\bsw_/,
+        "audio asset"
+      ]
+    ];
+
+    for (const [pattern, label] of choices) {
+      if (pattern.test(lower)) {
+        return label;
+      }
+    }
+
+    return type
+      ? type.replace(/[_-]+/g, " ")
+      : "Fortnite asset";
+  }
+
+  function assetName(path) {
+    const clean =
+      String(path || "")
+        .replace(/\\/g, "/")
+        .replace(/\.(?:uasset|uexp|ubulk)$/i, "");
+
+    const file =
+      clean.split("/").pop() ||
+      clean;
+
+    return (
+      file.split(".")[0] ||
+      "Unknown asset"
+    ).replace(/_C$/i, "");
+  }
+
+  function renderDescriptiveFallback(
+    path,
+    info,
+    ui,
+    reason = ""
+  ) {
+    ui.image.hidden = true;
+    ui.image.removeAttribute(
+      "src"
+    );
+
+    if (ui.stage) {
+      ui.stage.dataset
+        .previewState =
+        "description";
+    }
+
+    const name =
+      assetName(path);
+
+    const kind =
+      readableAssetKind(
+        info,
+        path
+      );
+
+    setStatus(
+      ui.status,
+      (
+        `No verified image is available yet.\n` +
+        `Asset: ${name}\n` +
+        `Path indicates: ${kind}.\n` +
+        "Visual details were not guessed; use Description or References for verified data."
+      ),
+      "metadata"
+    );
+
+    const offline =
+      /invalid url|offline|network|fetch|timeout|timed out/i
+        .test(
+          String(reason || "")
+        );
+
+    setMeta(
+      ui.meta,
+      offline
+        ? "Path-only fallback • the live renderer did not respond"
+        : "Path-only fallback • no deterministic image was found",
+      "partial"
+    );
+
+    return {
+      state: "metadata",
+      kind,
+      inspection: info || null
+    };
+  }
+
   async function renderPreview(
     target,
     path,
@@ -785,7 +983,22 @@
     }
 
     try {
-      // 1) Existing direct image resolver: icons/UI/known deterministic images.
+      // 1) Th3Dry/FNAA's known catalogue images are the quickest and most
+      // deterministic layer for islands and Creative devices.
+      if (
+        await tryKnownCatalogImage(
+          clean,
+          ui
+        )
+      ) {
+        return {
+          state: "ready",
+          kind: "catalog-image"
+        };
+      }
+
+      // 2) Dilly-backed direct resolver: cosmetic icons, UI and referenced
+      // textures. Keep this as a direct <img> URL for iPhone Safari stability.
       if (
         await tryDirectAssetImage(
           clean,
@@ -798,7 +1011,8 @@
         };
       }
 
-      // 2) The asset itself may be a real UTexture.
+      // 3) The NovaSparx server can decode the asset itself when it is a real
+      // UTexture and no public still image exists.
       if (
         await tryTextureDecode(
           clean,
@@ -811,7 +1025,7 @@
         };
       }
 
-      // 3) Inspect before deciding what preview is technically honest.
+      // 4) Inspect before deciding what preview is technically honest.
       const info =
         await inspect(clean);
 
@@ -865,22 +1079,31 @@
           ""
         )
       ) {
-        await renderNovaMesh(
-          clean,
-          ui.image,
-          ui.status,
-          ui.meta
-        );
+        try {
+          await renderNovaMesh(
+            clean,
+            ui.image,
+            ui.status,
+            ui.meta
+          );
 
-        return {
-          state: "ready",
-          kind: "mesh",
-          inspection: info
-        };
+          return {
+            state: "ready",
+            kind: "mesh",
+            inspection: info
+          };
+        } catch (error) {
+          return renderDescriptiveFallback(
+            clean,
+            info,
+            ui,
+            error?.message
+          );
+        }
       }
 
-      // 4) Unknown type: make one geometry attempt. If NovaSparx says the asset
-      // is not renderable, we fall back to honest metadata-only text.
+      // 5) Unknown type: make one geometry attempt and then use an honest,
+      // path-labelled fallback. Backend transport messages never leak into UI.
       try {
         await renderNovaMesh(
           clean,
@@ -895,93 +1118,26 @@
           inspection: info
         };
       } catch (error) {
-        if (
-          error?.code !==
-            "NOVA_MISSING" &&
-          !/geometry|renderable|mesh/i
-            .test(
-              String(
-                error?.message ||
-                ""
-              )
-            )
-        ) {
-          throw error;
-        }
+        return renderDescriptiveFallback(
+          clean,
+          info,
+          ui,
+          error?.message
+        );
       }
-
-      setStatus(
-        ui.status,
-        (
-          "No deterministic visual preview is available for this asset yet. " +
-          "Use Description or References for verified data."
-        ),
-        "metadata"
-      );
-
-      return {
-        state: "metadata",
-        kind:
-          type || "unknown",
-        inspection: info
-      };
     } catch (error) {
-      ui.image.hidden = true;
-
-      ui.image
-        .removeAttribute(
-          "src"
-        );
-
-      if (
-        error?.code ===
-        "NOVA_MISSING"
-      ) {
-        setStatus(
-          ui.status,
-          (
-            "NovaSparx could not get a deterministic renderable preview for this asset yet. " +
-            "Use Description for verified data."
-          ),
-          "missing"
-        );
-      } else if (
-        error?.name ===
-        "AbortError"
-      ) {
-        setStatus(
-          ui.status,
-          "Preview timed out. Try again.",
-          "error"
-        );
-      } else {
-        setStatus(
-          ui.status,
-          error?.message ||
-          t(
-            "imageUnavailable",
-            "Preview unavailable."
-          ),
-          "error"
-        );
-      }
-
-      setMeta(
-        ui.meta,
-        ""
-      );
-
       console.warn(
         "FNAA preview:",
         error
       );
 
-      return {
-        state: "error",
-        error:
-          error?.message ||
-          String(error)
-      };
+      return renderDescriptiveFallback(
+        clean,
+        null,
+        ui,
+        error?.message ||
+        String(error)
+      );
     } finally {
       if (button) {
         button.disabled = false;
@@ -1029,7 +1185,7 @@
 
   window.FortnitePreview =
     Object.freeze({
-      version: "1.0.1",
+      version: "1.0.2",
       toggle,
       render: renderPreview,
       release
