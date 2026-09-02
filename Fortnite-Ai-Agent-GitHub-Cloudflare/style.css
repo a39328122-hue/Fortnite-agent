@@ -785,6 +785,13 @@ html.fnaa-guest-slowmode-active #sendButton{
   height:var(--app-height);
   overflow:hidden;
   background:var(--bg);
+  isolation:isolate;
+  overscroll-behavior:contain;
+}
+
+body.fnaa-tools-open .app-shell,
+body.fnaa-settings-open .app-shell{
+  visibility:hidden;
 }
 
 .tools-shell{
@@ -1020,6 +1027,36 @@ html[dir="rtl"] .asset-search-meta{text-align:left}
   object-fit:cover;
   background:var(--panel-2);
 }
+.catalog-image-wrap{
+  position:relative;
+  width:44px;
+  height:44px;
+  flex:0 0 44px;
+  display:grid;
+  place-items:center;
+}
+.catalog-image-wrap .tool-card-image{
+  grid-area:1/1;
+}
+.catalog-image-placeholder{
+  width:44px;
+  height:44px;
+  grid-area:1/1;
+  display:grid;
+  place-items:center;
+  border:1px solid var(--line-strong);
+  border-radius:8px;
+  background:var(--panel-2);
+  color:var(--muted);
+  font-size:9px;
+  font-weight:850;
+  letter-spacing:.06em;
+}
+.cosmetic-image-wrap{
+  width:78px;
+  height:78px;
+  flex-basis:78px;
+}
 .tool-card-title{
   min-width:0;
   font-size:13px;
@@ -1057,8 +1094,8 @@ html[dir="rtl"] .asset-search-meta{text-align:left}
   font-size:10px;
 }
 
-/* Requested Description cooldown UX:
-   normal button -> 3 second grey "X sec left" flash -> normal button. */
+/* Shared guest cooldown UX:
+   normal button -> 3 second grey "SlowMode N.." flash -> normal button. */
 .asset-result-actions .description-cooldown,
 .asset-result-actions .description-cooldown:disabled{
   opacity:1;
@@ -1224,6 +1261,26 @@ html[dir="rtl"] .asset-search-meta{text-align:left}
     var(--bg-soft);
 }
 
+.mesh-image-stage[data-preview-state="description"]{
+  flex-direction:column;
+  gap:2px;
+  padding:18px;
+}
+.mesh-image-stage[data-preview-state="description"]::before{
+  content:"ASSET";
+  width:66px;
+  height:66px;
+  display:grid;
+  place-items:center;
+  border:1px solid var(--line-strong);
+  border-radius:15px;
+  background:var(--panel-2);
+  color:var(--muted);
+  font-size:10px;
+  font-weight:900;
+  letter-spacing:.12em;
+}
+
 .mesh-image-status{
   max-width:620px;
   padding:22px;
@@ -1387,6 +1444,8 @@ html[dir="rtl"] .asset-search-meta{text-align:left}
   min-height:0;
   overflow:hidden;
   background:var(--bg);
+  isolation:isolate;
+  overscroll-behavior:contain;
 }
 
 .settings-shell{
