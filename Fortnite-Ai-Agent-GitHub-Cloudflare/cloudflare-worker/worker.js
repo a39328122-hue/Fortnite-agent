@@ -28,9 +28,11 @@ const MAX_ASSET_PATH = 2400;
 
 const ABUSE_WINDOW_MS = 60_000;
 const ABUSE_MAX_PER_WINDOW = 90;
+const ASSET_ABUSE_MAX_PER_WINDOW = 180;
 
 const FALLBACK_GUEST_TIMES = new Map();
 const ABUSE_BUCKETS = new Map();
+const ASSET_ABUSE_BUCKETS = new Map();
 
 const STATELESS_AUTH_VERSION = 1;
 const STATELESS_AUTH_AAD =
@@ -768,6 +770,28 @@ function isExplicitHistoricalQuery(
 function allowByAbuseLimit(
   request
 ) {
+  return allowByWindowLimit(
+    request,
+    ABUSE_BUCKETS,
+    ABUSE_MAX_PER_WINDOW
+  );
+}
+
+function allowByAssetLimit(
+  request
+) {
+  return allowByWindowLimit(
+    request,
+    ASSET_ABUSE_BUCKETS,
+    ASSET_ABUSE_MAX_PER_WINDOW
+  );
+}
+
+function allowByWindowLimit(
+  request,
+  buckets,
+  maximum
+) {
   const ip =
     request.headers.get(
       "CF-Connecting-IP"
@@ -777,14 +801,14 @@ function allowByAbuseLimit(
     Date.now();
 
   const bucket =
-    ABUSE_BUCKETS.get(ip);
+    buckets.get(ip);
 
   if (
     !bucket ||
     now - bucket.startedAt >=
       ABUSE_WINDOW_MS
   ) {
-    ABUSE_BUCKETS.set(
+    buckets.set(
       ip,
       {
         startedAt: now,
@@ -798,18 +822,18 @@ function allowByAbuseLimit(
   bucket.count++;
 
   if (
-    ABUSE_BUCKETS.size >
+    buckets.size >
     6000
   ) {
     for (
       const [key, value] of
-      ABUSE_BUCKETS
+      buckets
     ) {
       if (
         now - value.startedAt >=
         ABUSE_WINDOW_MS
       ) {
-        ABUSE_BUCKETS.delete(
+        buckets.delete(
           key
         );
       }
@@ -818,7 +842,7 @@ function allowByAbuseLimit(
 
   return (
     bucket.count <=
-    ABUSE_MAX_PER_WINDOW
+    maximum
   );
 }
 
@@ -3886,6 +3910,111 @@ async function handleImageRequest(
   }
 }
 
+async function handleCachedImageRequest(
+  request,
+  env,
+  url,
+  ctx
+) {
+  const cache =
+    typeof caches !== "undefined"
+      ? caches.default
+      : null;
+
+  const cacheKey =
+    new Request(
+      url.toString(),
+      {
+        method: "GET"
+      }
+    );
+
+  if (cache) {
+    let cached = null;
+
+    try {
+      cached =
+        await cache.match(
+          cacheKey
+        );
+    } catch {
+      // Cache API failures must never make the public image route fail.
+    }
+
+    if (cached) {
+      return cached;
+    }
+  }
+
+  if (!allowByAssetLimit(request)) {
+    return plain(
+      "Too many asset requests. Try again shortly.",
+      429,
+      {
+        ...publicBinaryHeaders(
+          "text/plain; charset=utf-8",
+          "no-store"
+        ),
+        "Retry-After": "60"
+      }
+    );
+  }
+
+  const response =
+    await handleImageRequest(
+      request,
+      env,
+      url,
+      false
+    );
+
+  if (
+    cache &&
+    response.ok &&
+    String(
+      response.headers.get(
+        "content-type"
+      ) || ""
+    ).toLowerCase()
+      .startsWith("image/")
+  ) {
+    const save =
+      cache.put(
+        cacheKey,
+        response.clone()
+      ).catch(
+        () => {}
+      );
+
+    if (ctx?.waitUntil) {
+      ctx.waitUntil(save);
+    } else {
+      await save;
+    }
+  }
+
+  return response;
+}
+
+function assetRateLimitResponse(
+  request,
+  env
+) {
+  return json(
+    request,
+    env,
+    {
+      state: "rate-limited",
+      error:
+        "Too many asset requests. Try again shortly."
+    },
+    429,
+    {
+      "Retry-After": "60"
+    }
+  );
+}
+
 /* -------------------------------------------------------------------------- */
 /* Auth routes                                                                */
 /* -------------------------------------------------------------------------- */
@@ -4811,7 +4940,8 @@ async function handleChat(
 export default {
   async fetch(
     request,
-    env
+    env,
+    ctx
   ) {
     const url =
       new URL(
@@ -4892,7 +5022,7 @@ export default {
           ok: true,
           service: "FNAA",
           version:
-            "1.0.0",
+            "1.0.2",
           fortnite:
             CURRENT_FORTNITE_VERSION,
           authProvider:
@@ -5229,11 +5359,11 @@ export default {
       url.pathname ===
         "/image"
     ) {
-      return handleImageRequest(
+      return handleCachedImageRequest(
         request,
         env,
         url,
-        false
+        ctx
       );
     }
 
@@ -5243,6 +5373,13 @@ export default {
       url.pathname ===
         "/image-status"
     ) {
+      if (!allowByAssetLimit(request)) {
+        return assetRateLimitResponse(
+          request,
+          env
+        );
+      }
+
       return handleImageRequest(
         request,
         env,
@@ -5256,6 +5393,13 @@ export default {
         "/nova/"
       )
     ) {
+      if (!allowByAssetLimit(request)) {
+        return assetRateLimitResponse(
+          request,
+          env
+        );
+      }
+
       return handleNovaProxy(
         request,
         env,
@@ -5269,6 +5413,13 @@ export default {
       url.pathname ===
         "/asset/context"
     ) {
+      if (!allowByAssetLimit(request)) {
+        return assetRateLimitResponse(
+          request,
+          env
+        );
+      }
+
       if (
         !isAllowedOrigin(
           request,
