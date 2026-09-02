@@ -64,7 +64,7 @@
     "Subscribe to my YT channel @27lf.txt";
 
   const DEFAULT_USER_AVATAR =
-    "./assets/default-user-avatar.jpeg";
+    `${SITE_BASE_PATH}assets/default-user-avatar.jpeg`;
 
   const FNAA_CLIENT =
     "web-v1";
@@ -1139,7 +1139,7 @@
       "assistant-avatar";
 
     avatar.src =
-      "./assets/fnaa-avatar.jpeg";
+      `${SITE_BASE_PATH}assets/fnaa-avatar.jpeg`;
 
     avatar.alt = "";
 
@@ -1805,6 +1805,16 @@
       };
     }
 
+    // Start the shared guest deadline on the accepted click, not after the AI
+    // finishes. New Chat therefore cannot reset or bypass the active limit.
+    if (
+      !getPublicAuthState()
+        ?.user &&
+      !isSlowmodeExempt(clean)
+    ) {
+      startGuestSlowmode();
+    }
+
     if (
       !skipRoute &&
       currentRoute() !==
@@ -1982,13 +1992,6 @@
       !!getPublicAuthState()
         ?.user;
 
-    const slowmodeExempt =
-      isSlowmodeExempt(
-        lastUserMessage(
-          chat.messages
-        )
-      );
-
     const body = {
       mode: "chat",
       messages:
@@ -2082,13 +2085,6 @@
         data.error ||
         `Request failed (${response.status})`
       );
-    }
-
-    if (
-      !loggedIn &&
-      !slowmodeExempt
-    ) {
-      startGuestSlowmode();
     }
 
     return data;
@@ -3449,7 +3445,7 @@
         <div class="assistant-name assistant-brand">
           <img
             class="assistant-avatar"
-            src="./assets/fnaa-avatar.jpeg"
+            src="${SITE_BASE_PATH}assets/fnaa-avatar.jpeg"
             alt=""
           />
           <span>Fortnite Ai Agent</span>
@@ -3524,6 +3520,10 @@
     els.settingsOverlay.hidden =
       false;
 
+    document.body.classList.add(
+      "fnaa-settings-open"
+    );
+
     els.settingsOverlay
       .setAttribute(
         "aria-hidden",
@@ -3552,6 +3552,10 @@
 
     els.settingsOverlay.hidden =
       true;
+
+    document.body.classList.remove(
+      "fnaa-settings-open"
+    );
 
     els.settingsOverlay
       .setAttribute(
@@ -3778,7 +3782,7 @@
         <h1 class="login-brand brand-with-avatar">
           <img
             class="brand-avatar login-brand-avatar"
-            src="./assets/fnaa-avatar.jpeg"
+            src="${SITE_BASE_PATH}assets/fnaa-avatar.jpeg"
             alt=""
           />
           <span>Fortnite Ai Agent</span>
@@ -4803,7 +4807,7 @@
 
   window.FortniteAgent =
     Object.freeze({
-      version: "1.0.0",
+      version: "1.0.2",
 
       searchDatabase,
       describePath,
@@ -4830,6 +4834,31 @@
               1000
             )
           ),
+
+      beginGuestToolSlowmode:
+        () => {
+          if (
+            getPublicAuthState()
+              ?.user
+          ) {
+            return 0;
+          }
+
+          startGuestSlowmode();
+
+          return Math.max(
+            1,
+            Math.ceil(
+              guestSlowmodeRemainingMs() /
+              1000
+            )
+          );
+        },
+
+      isSignedIn:
+        () =>
+          !!getPublicAuthState()
+            ?.user,
 
       getAccountState:
         () => ({
