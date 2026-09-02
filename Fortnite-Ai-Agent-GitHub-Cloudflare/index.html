@@ -14,6 +14,13 @@
   />
   <meta name="referrer" content="no-referrer" />
 
+  <!--
+    Keep every local asset anchored to the GitHub Pages project root.
+    This must exist before CSS, images and scripts are parsed; adding it later
+    from JavaScript is too late for Safari after SPA route changes.
+  -->
+  <base href="/Fortnite-agent/" data-fnaa-base="1" />
+
   <meta
     http-equiv="Content-Security-Policy"
     content="
@@ -45,7 +52,8 @@
 
   <title>Fortnite Ai Agent</title>
 
-  <link rel="stylesheet" href="./style.css?v=100" />
+  <link rel="stylesheet" href="style.css?v=102" />
+  <link rel="stylesheet" href="fnaa-v101.css?v=102" />
 </head>
 
 <body>
@@ -59,7 +67,7 @@
         <div class="brand brand-with-avatar">
           <img
             class="brand-avatar"
-            src="./assets/fnaa-avatar.jpeg"
+            src="assets/fnaa-avatar.jpeg"
             alt=""
           />
           <span data-i18n="brand">
@@ -133,7 +141,7 @@
       <div class="topbar-title brand-with-avatar topbar-brand">
         <img
           class="brand-avatar"
-          src="./assets/fnaa-avatar.jpeg"
+          src="assets/fnaa-avatar.jpeg"
           alt=""
         />
 
@@ -338,7 +346,7 @@
             <img
               id="profileAvatar"
               class="profile-avatar"
-              src="./assets/default-user-avatar.jpeg"
+              src="assets/default-user-avatar.jpeg"
               alt=""
             />
 
@@ -507,15 +515,16 @@
     </div>
   </section>
 
-  <script src="./i18n.js?v=100"></script>
-  <script src="./config.js?v=100"></script>
-  <script src="./auth.js?v=100"></script>
+  <script src="i18n.js?v=102"></script>
+  <script src="config.js?v=102"></script>
+  <script src="auth.js?v=102"></script>
 
-  <script src="./novasparx-core.js?v=100"></script>
-  <script src="./novasparx-renderer.js?v=100"></script>
-  <script src="./preview.js?v=100"></script>
+  <script src="novasparx-core.js?v=102"></script>
+  <script src="novasparx-renderer.js?v=102"></script>
+  <script src="preview.js?v=102"></script>
 
-  <script src="./tools.js?v=100"></script>
-  <script src="./app.js?v=100"></script>
+  <script src="tools.js?v=102"></script>
+  <script src="app.js?v=102"></script>
+  <script src="fnaa-v101.js?v=102"></script>
 </body>
 </html>
