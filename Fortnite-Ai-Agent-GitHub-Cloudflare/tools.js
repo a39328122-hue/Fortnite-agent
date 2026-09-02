@@ -27,8 +27,14 @@
   const FORTNITE_API =
     "https://fortnite-api.com/v2/cosmetics/br";
 
+  const TH3DRY_IMAGE_BASE =
+    "https://raw.githubusercontent.com/Th3DryZ69/FortniteToolsWeb/main/public/images/";
+
   const COSMETIC_PAGE = 40;
-  const SEARCH_DEBOUNCE_MS = 320;
+  const CATALOG_PAGE = 48;
+  const DEVICE_DETAIL_PAGE = 20;
+  const STATIC_DATA_TIMEOUT_MS = 12_000;
+  const ACTION_FLASH_MS = 3_000;
 
   const t = (key, fallback = "") =>
     window.FortniteI18n?.t?.(key) ||
@@ -40,6 +46,15 @@
   let deviceData = null;
   let cosmeticResults = [];
   let cosmeticShown = 0;
+  let cosmeticFilter = "all";
+
+  let renderGeneration = 0;
+  let staticCatalogPromise = null;
+  let islandRows = null;
+  let deviceRows = null;
+
+  const knownImageByPath =
+    new Map();
 
   const exportJsonCache = new Map();
 
@@ -93,13 +108,23 @@
     overlay.hidden = false;
     overlay.setAttribute("aria-hidden", "false");
 
+    document.body.classList.add(
+      "fnaa-tools-open"
+    );
+
     updateGuestBanner();
     render();
   }
 
   function close() {
+    renderGeneration++;
+
     overlay.hidden = true;
     overlay.setAttribute("aria-hidden", "true");
+
+    document.body.classList.remove(
+      "fnaa-tools-open"
+    );
   }
 
   function updateGuestBanner() {
@@ -112,19 +137,36 @@
   }
 
   async function render() {
+    const generation =
+      ++renderGeneration;
+
     content.innerHTML =
       '<div class="tool-section"><div class="tool-empty">Loading...</div></div>';
 
     try {
-      if (active === "assets") return renderAssets();
-      if (active === "ids") return renderIds();
-      if (active === "devices") return renderDevices();
-      if (active === "convert") return renderConverters();
-      if (active === "path") return renderPathModifier();
-      if (active === "cosmetic") return renderCosmetics();
-
-      return renderAssets();
+      if (active === "assets") {
+        renderAssets();
+      } else if (active === "ids") {
+        await renderIds(generation);
+      } else if (active === "devices") {
+        await renderDevices(generation);
+      } else if (active === "convert") {
+        renderConverters();
+      } else if (active === "path") {
+        renderPathModifier();
+      } else if (active === "cosmetic") {
+        renderCosmetics();
+      } else {
+        renderAssets();
+      }
     } catch (error) {
+      if (
+        generation !==
+        renderGeneration
+      ) {
+        return;
+      }
+
       content.innerHTML = `
         <div class="tool-section">
           <div class="tool-empty">
@@ -234,9 +276,12 @@
     const scopeRoot =
       content.querySelector(".asset-scope-tabs");
 
+    const searchButton =
+      content.querySelector("#assetSearch");
+
     let scope = routeScope() || "all";
     let latestRun = 0;
-    let debounceTimer = 0;
+    let searchRunning = false;
 
     for (const button of scopeRoot.querySelectorAll("[data-scope]")) {
       button.classList.toggle(
@@ -254,17 +299,11 @@
       input.value = initialQuery;
     }
 
-    const schedule = () => {
-      clearTimeout(debounceTimer);
-
-      debounceTimer =
-        setTimeout(
-          () => run(),
-          SEARCH_DEBOUNCE_MS
-        );
-    };
-
     const run = async () => {
+      if (searchRunning) {
+        return;
+      }
+
       const query =
         input.value.trim();
 
@@ -281,6 +320,9 @@
           "Type something to search.";
         return;
       }
+
+      searchRunning = true;
+      searchButton.disabled = true;
 
       results.className = "tool-empty";
 
@@ -360,6 +402,13 @@
         results.textContent =
           error?.message ||
           "Search failed.";
+      } finally {
+        if (
+          thisRun === latestRun
+        ) {
+          searchRunning = false;
+          searchButton.disabled = false;
+        }
       }
     };
 
@@ -381,23 +430,10 @@
           );
         }
 
-        schedule();
+        // Scope and formatting choices are applied only after Search/Enter.
+        // This prevents several large shard requests while somebody is still
+        // typing on an iPhone.
       }
-    );
-
-    formattedToggle.addEventListener(
-      "change",
-      schedule
-    );
-
-    classToggle.addEventListener(
-      "change",
-      schedule
-    );
-
-    input.addEventListener(
-      "input",
-      schedule
     );
 
     input.addEventListener(
@@ -407,22 +443,17 @@
 
         event.preventDefault();
 
-        clearTimeout(debounceTimer);
         run();
       }
     );
 
-    content
-      .querySelector("#assetSearch")
-      .addEventListener(
-        "click",
-        () => {
-          clearTimeout(debounceTimer);
-          run();
-        }
-      );
+    searchButton.addEventListener(
+      "click",
+      run
+    );
 
-    if (initialQuery) run();
+    // A restored route may refill the field, but the user still starts the
+    // search explicitly with Search or Enter.
   }
 
   function pathCard(
@@ -488,25 +519,25 @@
             class="json-view-button"
             type="button"
             data-asset-action="describe"
-          >Description</button>
+          >${escapeHtml(t("description", "Description"))}</button>
 
           <button
             class="json-view-button"
             type="button"
             data-asset-action="preview"
-          >Preview</button>
+          >${escapeHtml(t("viewImage", "View Image"))}</button>
 
           <button
             class="json-view-button"
             type="button"
             data-asset-action="json"
-          >View JSON</button>
+          >${escapeHtml(t("viewJson", "View JSON"))}</button>
 
           <button
             class="json-view-button"
             type="button"
             data-asset-action="references"
-          >References</button>
+          >${escapeHtml(t("viewReferences", "View References"))}</button>
         </div>
 
         <div
@@ -551,10 +582,53 @@
           return;
         }
 
+        const panelRequest =
+          beginPanelRequest(
+            card,
+            button,
+            action
+          );
+
+        if (
+          panelRequest.state ===
+          "hidden"
+        ) {
+          return;
+        }
+
+        const usesGuestSlowmode =
+          action === "preview" ||
+          action === "references";
+
+        const remaining =
+          usesGuestSlowmode
+            ? guestActionRemaining()
+            : 0;
+
+        if (remaining > 0) {
+          cancelPanelRequest(
+            card,
+            button
+          );
+
+          flashActionCooldown(
+            button,
+            remaining
+          );
+
+          return;
+        }
+
+        if (usesGuestSlowmode) {
+          window.FortniteAgent
+            ?.beginGuestToolSlowmode?.();
+        }
+
         if (action === "preview") {
           await previewPath(
             card,
-            path
+            path,
+            panelRequest.id
           );
           return;
         }
@@ -562,7 +636,8 @@
         if (action === "json") {
           await showJson(
             card,
-            path
+            path,
+            panelRequest.id
           );
           return;
         }
@@ -570,10 +645,190 @@
         if (action === "references") {
           await showReferences(
             card,
-            path
+            path,
+            panelRequest.id
           );
         }
       }
+    );
+  }
+
+  function panelLabels(action) {
+    const labels = {
+      preview: [
+        t("viewImage", "View Image"),
+        t("hideImage", "Hide Image")
+      ],
+
+      json: [
+        t("viewJson", "View JSON"),
+        t("hideJson", "Hide JSON")
+      ],
+
+      references: [
+        t("viewReferences", "View References"),
+        t("hideReferences", "Hide References")
+      ]
+    };
+
+    return labels[action] || [
+      action,
+      action
+    ];
+  }
+
+  function resetPanelButtons(
+    card,
+    except = null
+  ) {
+    for (
+      const item of
+      card.querySelectorAll(
+        "[data-asset-action]"
+      )
+    ) {
+      const action =
+        item.dataset.assetAction;
+
+      if (
+        action === "describe" ||
+        item === except
+      ) {
+        continue;
+      }
+
+      item.textContent =
+        panelLabels(action)[0];
+
+      delete item.dataset.fnaaOpen;
+    }
+  }
+
+  function beginPanelRequest(
+    card,
+    button,
+    action
+  ) {
+    const panel =
+      card.querySelector(
+        "[data-asset-panel]"
+      );
+
+    const current =
+      card.dataset.openAction ||
+      "";
+
+    const nextId =
+      Number(
+        card.dataset.panelRequestId ||
+        0
+      ) + 1;
+
+    card.dataset.panelRequestId =
+      String(nextId);
+
+    if (
+      current === action &&
+      panel &&
+      !panel.hidden
+    ) {
+      panel.hidden = true;
+      panel.replaceChildren();
+
+      delete card.dataset.openAction;
+
+      resetPanelButtons(card);
+
+      if (action === "preview") {
+        window.FortnitePreview
+          ?.release?.(
+            card.dataset.assetPath ||
+            ""
+          );
+      }
+
+      return {
+        state: "hidden",
+        id: nextId
+      };
+    }
+
+    card.dataset.openAction =
+      action;
+
+    resetPanelButtons(
+      card,
+      button
+    );
+
+    button.textContent =
+      panelLabels(action)[1];
+
+    button.dataset.fnaaOpen =
+      "1";
+
+    if (panel) {
+      panel.hidden = false;
+    }
+
+    return {
+      state: "open",
+      id: nextId
+    };
+  }
+
+  function cancelPanelRequest(
+    card,
+    button
+  ) {
+    const panel =
+      card.querySelector(
+        "[data-asset-panel]"
+      );
+
+    if (panel) {
+      panel.hidden = true;
+      panel.replaceChildren();
+    }
+
+    delete card.dataset.openAction;
+    resetPanelButtons(card);
+
+    if (button) {
+      button.textContent =
+        panelLabels(
+          button.dataset.assetAction
+        )[0];
+    }
+  }
+
+  function panelRequestIsCurrent(
+    card,
+    action,
+    requestId
+  ) {
+    return (
+      Number(
+        card.dataset.panelRequestId ||
+        0
+      ) === requestId &&
+      card.dataset.openAction ===
+        action
+    );
+  }
+
+  function guestActionRemaining() {
+    if (
+      window.FortniteAgent
+        ?.isSignedIn?.()
+    ) {
+      return 0;
+    }
+
+    return Number(
+      window.FortniteAgent
+        ?.getGuestSlowmodeRemainingSeconds
+        ?.() || 0
     );
   }
 
@@ -582,14 +837,10 @@
     button
   ) {
     const remaining =
-      Number(
-        window.FortniteAgent
-          ?.getGuestSlowmodeRemainingSeconds
-          ?.() || 0
-      );
+      guestActionRemaining();
 
     if (remaining > 0) {
-      flashDescriptionCooldown(
+      flashActionCooldown(
         button,
         remaining
       );
@@ -598,45 +849,75 @@
     }
 
     if (
-      window.FortniteAgent
-        ?.describePath
+      button?.dataset
+        .descriptionBusy === "1"
     ) {
-      const result =
-        await window.FortniteAgent
-          .describePath(path);
+      return;
+    }
 
-      // Safety for an edge case where the cooldown starts between the button
-      // check and the send attempt. Keep the user in Tools and show the time
-      // on the button rather than pretending a request was sent.
+    if (button) {
+      button.dataset.descriptionBusy =
+        "1";
+
+      button.disabled = true;
+    }
+
+    try {
       if (
-        result?.blocked &&
-        result.retryAfterSeconds > 0
+        window.FortniteAgent
+          ?.describePath
       ) {
-        flashDescriptionCooldown(
-          button,
-          result.retryAfterSeconds
-        );
+        const result =
+          await window.FortniteAgent
+            .describePath(path);
 
+        // The shared guest deadline can start in another tab between the
+        // first check and the actual send.
+        if (
+          result?.blocked &&
+          result.retryAfterSeconds > 0
+        ) {
+          if (button) {
+            delete button.dataset
+              .descriptionBusy;
+          }
+
+          flashActionCooldown(
+            button,
+            result.retryAfterSeconds
+          );
+
+          return;
+        }
+
+        close();
         return;
       }
 
       close();
-      return;
+
+      window.dispatchEvent(
+        new CustomEvent(
+          "fnaa-describe-path",
+          {
+            detail: { path }
+          }
+        )
+      );
+    } finally {
+      if (
+        button?.dataset
+          .descriptionBusy === "1"
+      ) {
+        delete button.dataset
+          .descriptionBusy;
+
+        button.disabled = false;
+      }
     }
-
-    close();
-
-    window.dispatchEvent(
-      new CustomEvent(
-        "fnaa-describe-path",
-        {
-          detail: { path }
-        }
-      )
-    );
   }
 
-  function flashDescriptionCooldown(
+  function flashActionCooldown(
     button,
     seconds
   ) {
@@ -652,20 +933,20 @@
 
     clearTimeout(
       Number(
-        button.dataset
-          .descriptionCooldownTimer || 0
+      button.dataset
+          .actionCooldownTimer || 0
       )
     );
 
     button.dataset
-      .descriptionOriginalText =
+      .actionOriginalText =
       button.dataset
-        .descriptionOriginalText ||
+        .actionOriginalText ||
       button.textContent ||
       "Description";
 
     button.textContent =
-      `${safeSeconds} sec left`;
+      `SlowMode ${safeSeconds}..`;
 
     button.classList.add(
       "description-cooldown"
@@ -684,23 +965,24 @@
 
           button.textContent =
             button.dataset
-              .descriptionOriginalText ||
+              .actionOriginalText ||
             "Description";
 
           delete button.dataset
-            .descriptionCooldownTimer;
+            .actionCooldownTimer;
         },
-        3000
+        ACTION_FLASH_MS
       );
 
     button.dataset
-      .descriptionCooldownTimer =
+      .actionCooldownTimer =
       String(timer);
   }
 
   async function previewPath(
     card,
-    path
+    path,
+    requestId
   ) {
     const panel =
       card.querySelector(
@@ -731,12 +1013,33 @@
             path
           );
 
+        if (
+          !panelRequestIsCurrent(
+            card,
+            "preview",
+            requestId
+          )
+        ) {
+          panel.hidden = true;
+          panel.replaceChildren();
+        }
+
         return;
       }
 
       panel.innerHTML =
         '<div class="tool-empty">Preview module is not loaded yet.</div>';
     } catch (error) {
+      if (
+        !panelRequestIsCurrent(
+          card,
+          "preview",
+          requestId
+        )
+      ) {
+        return;
+      }
+
       panel.innerHTML = `
         <div class="tool-empty">
           ${escapeHtml(
@@ -749,7 +1052,8 @@
 
   async function showJson(
     card,
-    path
+    path,
+    requestId
   ) {
     const panel =
       card.querySelector(
@@ -770,6 +1074,16 @@
           null,
           2
         );
+
+      if (
+        !panelRequestIsCurrent(
+          card,
+          "json",
+          requestId
+        )
+      ) {
+        return;
+      }
 
       panel.innerHTML = `
         <div class="json-panel asset-json-panel">
@@ -792,6 +1106,16 @@
           () => copy(text)
         );
     } catch (error) {
+      if (
+        !panelRequestIsCurrent(
+          card,
+          "json",
+          requestId
+        )
+      ) {
+        return;
+      }
+
       panel.innerHTML = `
         <div class="tool-empty">
           ${escapeHtml(
@@ -804,7 +1128,8 @@
 
   async function showReferences(
     card,
-    path
+    path,
+    requestId
   ) {
     const panel =
       card.querySelector(
@@ -818,33 +1143,88 @@
     try {
       let payload = null;
 
+      // Dilly is the lightweight public layer for references. Resolve it
+      // before waking NovaSparx so an expired backend credential can never
+      // leak an "Unauthorized" transport error into this panel.
+      try {
+        const references =
+          extractJsonReferences(
+            await exportJson(path),
+            path
+          );
+
+        if (references.length) {
+          payload = {
+            state: "ready",
+            source: "dilly-json",
+            references
+          };
+        }
+      } catch {
+        // Continue to NovaSparx. Backend errors remain internal fallbacks.
+      }
+
       if (
+        !payload &&
         window.NovaSparx
           ?.inspect
       ) {
-        const inspection =
-          await window.NovaSparx
-            .inspect(path);
+        try {
+          const inspection =
+            await window.NovaSparx
+              .inspect(path);
 
-        if (
-          Array.isArray(
-            inspection?.references
-          )
-        ) {
-          payload = {
-            state: "ready",
-            references:
-              inspection.references
-          };
+          if (
+            Array.isArray(
+              inspection?.references
+            ) &&
+            inspection.references.length
+          ) {
+            payload = {
+              state: "ready",
+              references:
+                inspection.references
+            };
+          }
+        } catch {
+          // Continue to the edge endpoint and Dilly JSON fallback.
         }
       }
 
       if (!payload) {
-        payload =
-          await apiJson(
-            "/nova/references",
-            path
-          );
+        try {
+          payload =
+            await apiJson(
+              "/nova/references",
+              path
+            );
+        } catch {
+          // NovaSparx may be cold/offline. Dilly JSON can still provide
+          // deterministic object references for many lightweight assets.
+        }
+      }
+
+      if (
+        !payload ||
+        !Array.isArray(
+          payload.references
+        ) ||
+        !payload.references.length
+      ) {
+        payload = {
+          state: "missing",
+          references: []
+        };
+      }
+
+      if (
+        !panelRequestIsCurrent(
+          card,
+          "references",
+          requestId
+        )
+      ) {
+        return;
       }
 
       const refs =
@@ -894,6 +1274,16 @@
 
       bindCopyButtons(panel);
     } catch (error) {
+      if (
+        !panelRequestIsCurrent(
+          card,
+          "references",
+          requestId
+        )
+      ) {
+        return;
+      }
+
       panel.innerHTML = `
         <div class="tool-empty">
           ${escapeHtml(
@@ -902,6 +1292,138 @@
           )}
         </div>`;
     }
+  }
+
+  function extractJsonReferences(
+    data,
+    sourcePath = ""
+  ) {
+    const output = [];
+    const seen = new Set();
+    const sourceKey =
+      normalizeAssetLookupKey(
+        sourcePath
+      );
+
+    const add = (
+      value,
+      kind = "reference"
+    ) => {
+      if (
+        typeof value !==
+        "string"
+      ) {
+        return;
+      }
+
+      const match =
+        value.trim().match(
+          /(?:[A-Za-z][A-Za-z0-9_]+)?['\"]?((?:\/|FortniteGame\/|Engine\/)[^'\"\s]+)['\"]?/i
+        );
+
+      const path =
+        match?.[1]
+          ?.replace(/[),;]+$/, "") ||
+        "";
+
+      if (!path) return;
+
+      const key =
+        normalizeAssetLookupKey(path);
+
+      if (
+        !key ||
+        key === sourceKey ||
+        seen.has(key)
+      ) {
+        return;
+      }
+
+      seen.add(key);
+
+      output.push({
+        kind:
+          String(kind || "reference")
+            .slice(0, 40),
+        path
+      });
+    };
+
+    const scan = (
+      value,
+      key = "reference",
+      depth = 0
+    ) => {
+      if (
+        value === null ||
+        value === undefined ||
+        depth > 9 ||
+        output.length >= 200
+      ) {
+        return;
+      }
+
+      if (
+        typeof value ===
+        "string"
+      ) {
+        add(value, key);
+        return;
+      }
+
+      if (Array.isArray(value)) {
+        for (
+          const item of
+          value.slice(0, 250)
+        ) {
+          scan(
+            item,
+            key,
+            depth + 1
+          );
+
+          if (
+            output.length >= 200
+          ) {
+            break;
+          }
+        }
+
+        return;
+      }
+
+      if (
+        typeof value ===
+        "object"
+      ) {
+        let count = 0;
+
+        for (
+          const [childKey, child] of
+          Object.entries(value)
+        ) {
+          if (count++ >= 250) {
+            break;
+          }
+
+          scan(
+            child,
+            childKey,
+            depth + 1
+          );
+
+          if (
+            output.length >= 200
+          ) {
+            break;
+          }
+        }
+      }
+    };
+
+    scan(data);
+
+    return output;
   }
 
   function smartSearchScope(
@@ -984,40 +1506,189 @@
   // IDs
   // ---------------------------------------------------------------------------
 
-  async function renderIds() {
-    if (!idData) {
-      idData =
-        await fetchJson(
-          DB.ids ||
-          "./database/id.json"
-        );
+  async function loadStaticCatalogs() {
+    if (
+      idData &&
+      deviceData &&
+      islandRows &&
+      deviceRows
+    ) {
+      return {
+        islands: islandRows,
+        devices: deviceRows
+      };
     }
 
-    if (!deviceData) {
-      deviceData =
-        await fetchJson(
-          DB.devices ||
-          "./database/devicemeshs.json"
-        );
+    if (staticCatalogPromise) {
+      return staticCatalogPromise;
     }
 
-    const islands = [];
+    staticCatalogPromise =
+      (async () => {
+        const [ids, devices] =
+          await Promise.all([
+            idData ||
+              fetchJson(
+                DB.ids ||
+                "database/id.json",
+                STATIC_DATA_TIMEOUT_MS
+              ),
 
-    walkIdData(
-      idData,
-      islands
-    );
+            deviceData ||
+              fetchJson(
+                DB.devices ||
+                "database/devicemeshs.json",
+                STATIC_DATA_TIMEOUT_MS
+              )
+          ]);
 
-    const devices =
-      sortDevices(
-        cleanDeviceList(
-          normalizeDeviceData(
-            deviceData
-          )
-        )
-      );
+        idData = ids;
+        deviceData = devices;
+
+        const islands = [];
+
+        walkIdData(
+          idData,
+          islands
+        );
+
+        islandRows = islands;
+
+        deviceRows =
+          sortDevices(
+            cleanDeviceList(
+              normalizeDeviceData(
+                deviceData
+              )
+            )
+          );
+
+        rebuildKnownImageIndex();
+
+        return {
+          islands: islandRows,
+          devices: deviceRows
+        };
+      })();
+
+    try {
+      return await staticCatalogPromise;
+    } catch (error) {
+      staticCatalogPromise = null;
+      throw error;
+    }
+  }
+
+  function rebuildKnownImageIndex() {
+    knownImageByPath.clear();
+
+    const indexObject =
+      (value) => {
+        if (
+          !value ||
+          typeof value !== "object"
+        ) {
+          return;
+        }
+
+        if (!Array.isArray(value)) {
+          const image =
+            resolveCatalogImageUrl(
+              value.image
+            );
+
+          if (image) {
+            for (const field of [
+              "path",
+              "playset",
+              "plot",
+              "id"
+            ]) {
+              addKnownImage(
+                value[field],
+                image
+              );
+            }
+          }
+        }
+
+        for (
+          const child of
+          Array.isArray(value)
+            ? value
+            : Object.values(value)
+        ) {
+          indexObject(child);
+        }
+      };
+
+    indexObject(idData);
+    indexObject(deviceData);
+  }
+
+  function addKnownImage(
+    rawPath,
+    image
+  ) {
+    for (
+      const key of
+      assetLookupKeys(rawPath)
+    ) {
+      if (
+        !knownImageByPath.has(key)
+      ) {
+        knownImageByPath.set(
+          key,
+          image
+        );
+      }
+    }
+  }
+
+  async function findKnownImage(
+    rawPath
+  ) {
+    try {
+      // These catalogues are small and provide the actual verified image for
+      // IDs/devices. Do not let a slow mobile connection time out this layer
+      // and fall through to the heavyweight renderer unnecessarily.
+      await loadStaticCatalogs();
+    } catch {
+      return "";
+    }
+
+    for (
+      const key of
+      assetLookupKeys(rawPath)
+    ) {
+      const image =
+        knownImageByPath.get(key);
+
+      if (image) return image;
+    }
+
+    return "";
+  }
+
+  async function renderIds(
+    generation
+  ) {
+    const {
+      islands,
+      devices
+    } =
+      await loadStaticCatalogs();
+
+    if (
+      generation !==
+      renderGeneration
+    ) {
+      return;
+    }
 
     let showUnavailable = false;
+    let idsShown = CATALOG_PAGE;
+    let devicesShown = CATALOG_PAGE;
 
     content.innerHTML = `
       <div class="tool-section ids-combined-section">
@@ -1044,6 +1715,15 @@
           </div>
 
           <div id="idResults"></div>
+
+          <div class="tool-actions">
+            <button
+              id="idLoadMore"
+              class="tool-button"
+              type="button"
+              hidden
+            >${escapeHtml(t("loadMore", "Load more"))}</button>
+          </div>
         </section>
 
         <div class="ids-section-divider"></div>
@@ -1079,6 +1759,15 @@
           </div>
 
           <div id="deviceResultsInIds"></div>
+
+          <div class="tool-actions">
+            <button
+              id="deviceLoadMoreInIds"
+              class="tool-button"
+              type="button"
+              hidden
+            >${escapeHtml(t("loadMore", "Load more"))}</button>
+          </div>
         </section>
       </div>`;
 
@@ -1103,7 +1792,23 @@
         "#showAllDevices"
       );
 
-    const drawIds = () => {
+    const idMore =
+      content.querySelector(
+        "#idLoadMore"
+      );
+
+    const deviceMore =
+      content.querySelector(
+        "#deviceLoadMoreInIds"
+      );
+
+    const drawIds = (
+      reset = true
+    ) => {
+      if (reset) {
+        idsShown = CATALOG_PAGE;
+      }
+
       const query =
         idInput.value
           .trim()
@@ -1121,15 +1826,25 @@
 
       idResults.innerHTML =
         filtered
-          .slice(0, 180)
+          .slice(0, idsShown)
           .map(idCard)
           .join("") ||
         '<div class="tool-empty">No results.</div>';
 
       bindCopyButtons(idResults);
+      bindImageFallbacks(idResults);
+
+      idMore.hidden =
+        idsShown >= filtered.length;
     };
 
-    const drawDevices = () => {
+    const drawDevices = (
+      reset = true
+    ) => {
+      if (reset) {
+        devicesShown = CATALOG_PAGE;
+      }
+
       const query =
         deviceInput.value
           .trim()
@@ -1152,23 +1867,26 @@
 
       deviceResults.innerHTML =
         filtered
-          .slice(0, 220)
+          .slice(0, devicesShown)
           .map(deviceCardSimple)
           .join("") ||
         '<div class="tool-empty">No devices found.</div>';
 
       bindCopyButtons(deviceResults);
       bindImageFallbacks(deviceResults);
+
+      deviceMore.hidden =
+        devicesShown >= filtered.length;
     };
 
     idInput.addEventListener(
       "input",
-      drawIds
+      () => drawIds(true)
     );
 
     deviceInput.addEventListener(
       "input",
-      drawDevices
+      () => drawDevices(true)
     );
 
     showButton.addEventListener(
@@ -1182,37 +1900,51 @@
             ? "Hide Unavailable"
             : "Show All";
 
-        drawDevices();
+        drawDevices(true);
       }
     );
 
-    drawIds();
-    drawDevices();
+    idMore.addEventListener(
+      "click",
+      () => {
+        idsShown += CATALOG_PAGE;
+        drawIds(false);
+      }
+    );
+
+    deviceMore.addEventListener(
+      "click",
+      () => {
+        devicesShown +=
+          CATALOG_PAGE;
+
+        drawDevices(false);
+      }
+    );
+
+    drawIds(true);
+    drawDevices(true);
   }
 
   // ---------------------------------------------------------------------------
   // Devices
   // ---------------------------------------------------------------------------
 
-  async function renderDevices() {
-    if (!deviceData) {
-      deviceData =
-        await fetchJson(
-          DB.devices ||
-          "./database/devicemeshs.json"
-        );
+  async function renderDevices(
+    generation
+  ) {
+    const { devices } =
+      await loadStaticCatalogs();
+
+    if (
+      generation !==
+      renderGeneration
+    ) {
+      return;
     }
 
-    const devices =
-      sortDevices(
-        cleanDeviceList(
-          normalizeDeviceData(
-            deviceData
-          )
-        )
-      );
-
     let showUnavailable = false;
+    let shown = DEVICE_DETAIL_PAGE;
 
     content.innerHTML = `
       <div class="tool-section">
@@ -1250,6 +1982,15 @@
         </div>
 
         <div id="deviceResults"></div>
+
+        <div class="tool-actions">
+          <button
+            id="deviceLoadMore"
+            class="tool-button"
+            type="button"
+            hidden
+          >${escapeHtml(t("loadMore", "Load more"))}</button>
+        </div>
       </div>`;
 
     const input =
@@ -1267,7 +2008,18 @@
         "#showAllDevicesFull"
       );
 
-    const draw = () => {
+    const moreButton =
+      content.querySelector(
+        "#deviceLoadMore"
+      );
+
+    const draw = (
+      reset = true
+    ) => {
+      if (reset) {
+        shown = DEVICE_DETAIL_PAGE;
+      }
+
       const query =
         input.value
           .trim()
@@ -1290,18 +2042,21 @@
 
       results.innerHTML =
         filtered
-          .slice(0, 220)
+          .slice(0, shown)
           .map(deviceCard)
           .join("") ||
         '<div class="tool-empty">No devices found.</div>';
 
       bindCopyButtons(results);
       bindImageFallbacks(results);
+
+      moreButton.hidden =
+        shown >= filtered.length;
     };
 
     input.addEventListener(
       "input",
-      draw
+      () => draw(true)
     );
 
     showButton.addEventListener(
@@ -1315,11 +2070,19 @@
             ? "Hide Unavailable"
             : "Show All";
 
-        draw();
+        draw(true);
       }
     );
 
-    draw();
+    moreButton.addEventListener(
+      "click",
+      () => {
+        shown += DEVICE_DETAIL_PAGE;
+        draw(false);
+      }
+    );
+
+    draw(true);
   }
 
   function normalizeDeviceData(data) {
@@ -1490,8 +2253,10 @@
       item.id ||
       "Device";
 
-    const image =
-      deviceImageUrl(item);
+    const images =
+      catalogImageCandidates(
+        item
+      );
 
     const path =
       cleanDeviceText(item.path);
@@ -1502,14 +2267,11 @@
     return `
       <article class="tool-card th3-device-card">
         <div class="tool-card-head th3-device-head">
-          ${image
-            ? `<img
-                class="tool-card-image device-image"
-                src="${escapeAttr(image)}"
-                alt=""
-                loading="lazy"
-              />`
-            : ""}
+          ${layeredImageMarkup(
+            images,
+            title,
+            "device-image"
+          )}
 
           <div style="min-width:0;flex:1">
             <div class="tool-card-title">
@@ -1542,8 +2304,10 @@
       item.id ||
       "Device";
 
-    const image =
-      deviceImageUrl(item);
+    const images =
+      catalogImageCandidates(
+        item
+      );
 
     const path =
       cleanDeviceText(item.path);
@@ -1559,14 +2323,11 @@
     return `
       <article class="tool-card th3-device-card">
         <div class="tool-card-head th3-device-head">
-          ${image
-            ? `<img
-                class="tool-card-image device-image"
-                src="${escapeAttr(image)}"
-                alt=""
-                loading="lazy"
-              />`
-            : ""}
+          ${layeredImageMarkup(
+            images,
+            title,
+            "device-image"
+          )}
 
           <div style="min-width:0;flex:1">
             <div class="tool-card-title">
@@ -1671,10 +2432,13 @@
       </div>`;
   }
 
-  function deviceImageUrl(item) {
+  function resolveCatalogImageUrl(
+    value
+  ) {
     const raw =
-      String(item?.image || "")
-        .trim();
+      String(value || "")
+        .trim()
+        .replace(/\\/g, "/");
 
     if (!raw) return "";
 
@@ -1682,26 +2446,182 @@
       return raw;
     }
 
-    const filename =
-      raw
-        .replace(/\\/g, "/")
+    const marker =
+      raw.toLowerCase()
+        .lastIndexOf("/images/");
+
+    let relative =
+      marker >= 0
+        ? raw.slice(
+            marker +
+            "/images/".length
+          )
+        : raw
+            .replace(/^\.?\.\/images\//i, "")
+            .replace(/^public\/images\//i, "")
+            .replace(/^images\//i, "");
+
+    relative =
+      relative
+        .replace(/^\/+/, "")
         .split("/")
-        .pop();
+        .filter(Boolean)
+        .map((part) =>
+          encodeURIComponent(
+            decodeURIComponentSafe(part)
+          )
+        )
+        .join("/");
 
-    if (!filename) return "";
+    return relative
+      ? TH3DRY_IMAGE_BASE +
+          relative
+      : "";
+  }
 
-    return (
-      "https://raw.githubusercontent.com/" +
-      "Th3DryZ69/FortniteToolsWeb/main/" +
-      "public/images/devices/" +
-      encodeURIComponent(filename)
+  function decodeURIComponentSafe(
+    value
+  ) {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  }
+
+  function assetImageEndpoint(
+    route,
+    rawPath
+  ) {
+    const path =
+      String(rawPath || "")
+        .trim();
+
+    if (!API_ENDPOINT || !path) {
+      return "";
+    }
+
+    try {
+      const url =
+        new URL(
+          `${API_ENDPOINT}${route}`
+        );
+
+      url.searchParams.set(
+        "path",
+        path
+      );
+
+      return url.toString();
+    } catch {
+      return "";
+    }
+  }
+
+  function catalogImageCandidates(
+    item
+  ) {
+    const output = [];
+    const seen = new Set();
+
+    const add = (value) => {
+      const clean =
+        String(value || "")
+          .trim();
+
+      if (
+        !clean ||
+        seen.has(clean)
+      ) {
+        return;
+      }
+
+      seen.add(clean);
+      output.push(clean);
+    };
+
+    add(
+      resolveCatalogImageUrl(
+        item?.image
+      )
     );
+
+    const path =
+      cleanDeviceText(
+        item?.path ||
+        item?.playset ||
+        item?.plot ||
+        ""
+      );
+
+    if (path) {
+      // Layer 2: the edge image route resolves Dilly direct images and icon
+      // references. Layer 3: NovaSparx attempts a real texture decode.
+      add(
+        assetImageEndpoint(
+          "/image",
+          path
+        )
+      );
+
+      add(
+        assetImageEndpoint(
+          "/nova/texture",
+          path
+        )
+      );
+    }
+
+    return output;
+  }
+
+  function layeredImageMarkup(
+    candidates,
+    title,
+    extraClass = ""
+  ) {
+    const list =
+      [...new Set(
+        (candidates || [])
+          .filter(Boolean)
+      )];
+
+    const first =
+      list.shift() || "";
+
+    const badge =
+      String(title || "Asset")
+        .replace(/[^A-Za-z0-9]/g, "")
+        .slice(0, 3)
+        .toUpperCase() ||
+      "AST";
+
+    return `
+      <span class="catalog-image-wrap">
+        <img
+          class="tool-card-image ${escapeAttr(extraClass)}"
+          ${first ? `src="${escapeAttr(first)}"` : ""}
+          alt="${escapeAttr(String(title || "Asset") + " preview")}"
+          loading="lazy"
+          decoding="async"
+          data-layered-image
+          data-image-fallbacks="${escapeAttr(JSON.stringify(list))}"
+          ${first ? "" : "hidden"}
+        />
+
+        <span
+          class="catalog-image-placeholder"
+          data-image-placeholder
+          ${first ? "hidden" : ""}
+          aria-hidden="true"
+        >${escapeHtml(badge)}</span>
+      </span>`;
   }
 
   function bindImageFallbacks(root) {
     for (
       const image of root.querySelectorAll(
-        "img.device-image"
+        "img[data-layered-image]"
       )
     ) {
       if (image.dataset.fallbackBound) {
@@ -1710,12 +2630,172 @@
 
       image.dataset.fallbackBound = "1";
 
+      const placeholder =
+        image.parentElement
+          ?.querySelector(
+            "[data-image-placeholder]"
+          );
+
+      const next = () => {
+        let fallbacks = [];
+
+        try {
+          fallbacks =
+            JSON.parse(
+              image.dataset
+                .imageFallbacks ||
+              "[]"
+            );
+        } catch {
+          fallbacks = [];
+        }
+
+        const candidate =
+          fallbacks.shift() ||
+          "";
+
+        image.dataset.imageFallbacks =
+          JSON.stringify(fallbacks);
+
+        if (candidate) {
+          image.hidden = false;
+          image.src = candidate;
+          return;
+        }
+
+        image.hidden = true;
+        image.removeAttribute("src");
+
+        if (placeholder) {
+          placeholder.hidden = false;
+        }
+      };
+
+      image.addEventListener(
+        "load",
+        () => {
+          image.hidden = false;
+
+          if (placeholder) {
+            placeholder.hidden = true;
+          }
+        }
+      );
+
       image.addEventListener(
         "error",
-        () => image.remove(),
-        { once: true }
+        next
+      );
+
+      if (!image.getAttribute("src")) {
+        next();
+      } else if (image.complete) {
+        if (
+          image.naturalWidth > 0 &&
+          image.naturalHeight > 0
+        ) {
+          image.hidden = false;
+
+          if (placeholder) {
+            placeholder.hidden = true;
+          }
+        } else {
+          next();
+        }
+      }
+    }
+  }
+
+  function assetLookupKeys(
+    rawValue
+  ) {
+    let value =
+      unwrapAssetPath(rawValue)
+        .replace(/\\/g, "/")
+        .trim();
+
+    if (!value) return [];
+
+    value = value
+      .replace(/\.(?:uasset|uexp|ubulk)$/i, "")
+      .replace(/\/+$/, "");
+
+    const slash =
+      value.lastIndexOf("/");
+
+    const dot =
+      value.lastIndexOf(".");
+
+    if (dot > slash) {
+      const left =
+        value.slice(0, dot);
+
+      const objectName =
+        value.slice(dot + 1)
+          .replace(/_C$/i, "");
+
+      const packageName =
+        left.slice(
+          left.lastIndexOf("/") + 1
+        );
+
+      if (
+        objectName.toLowerCase() ===
+        packageName.toLowerCase()
+      ) {
+        value = left;
+      }
+    }
+
+    const variants =
+      new Set([
+        value.toLowerCase()
+      ]);
+
+    if (
+      /^FortniteGame\/Content\//i
+        .test(value)
+    ) {
+      variants.add(
+        (
+          "/Game/" +
+          value.slice(
+            "FortniteGame/Content/"
+              .length
+          )
+        ).toLowerCase()
       );
     }
+
+    const plugin =
+      value.match(
+        /^(?:FortniteGame\/)?Plugins\/(?:GameFeatures\/)?([^/]+)\/Content\/(.+)$/i
+      );
+
+    if (plugin) {
+      variants.add(
+        `/${plugin[1]}/${plugin[2]}`
+          .toLowerCase()
+      );
+    }
+
+    if (/^\/Game\//i.test(value)) {
+      variants.add(
+        (
+          "FortniteGame/Content/" +
+          value.slice(6)
+        ).toLowerCase()
+      );
+    }
+
+    return [...variants];
+  }
+
+  function normalizeAssetLookupKey(
+    value
+  ) {
+    return assetLookupKeys(value)[0] ||
+      "";
   }
 
   // ---------------------------------------------------------------------------
@@ -1984,7 +3064,11 @@
         "&raw=true";
 
       const response =
-        await fetch(url);
+        await fetchWithTimeout(
+          url,
+          {},
+          24_000
+        );
 
       if (!response.ok) {
         throw new Error(
@@ -2146,7 +3230,13 @@
         : `${FORTNITE_API}/search?name=${encodeURIComponent(input)}${backendType ? `&backendType=${encodeURIComponent(backendType)}` : ""}&responseFlags=7`;
 
     const response =
-      await fetch(url);
+      await fetchWithTimeout(
+        url,
+        {
+          cache: "force-cache"
+        },
+        14_000
+      );
 
     if (!response.ok) {
       return null;
@@ -2683,7 +3773,7 @@
   // Cosmetic browser
   // ---------------------------------------------------------------------------
 
-  function renderCosmetics() {
+  function renderCosmeticsLegacy() {
     content.innerHTML = `
       <div class="tool-section">
         <h2>${escapeHtml(
@@ -2991,6 +4081,491 @@
     );
   }
 
+  // Current cosmetic browser. The older local-path implementation above is
+  // intentionally retained as an offline reference, but FNAA 1.0.2 uses the
+  // public cosmetic catalogue so outfits, emotes and back blings all have
+  // their own visible icon and canonical ID/path.
+  function renderCosmetics() {
+    cosmeticFilter = "all";
+
+    content.innerHTML = `
+      <div class="tool-section">
+        <h2>${escapeHtml(
+          t(
+            "cosmeticBrowser",
+            "Cosmetic Browser"
+          )
+        )}</h2>
+
+        <p class="tool-note">
+          ${escapeHtml(
+            t(
+              "cosmeticNote",
+              "Search outfits, emotes and back blings with visible icons."
+            )
+          )}
+        </p>
+
+        <div class="tool-searchbar">
+          <input
+            id="cosmeticSearch"
+            placeholder="${escapeAttr(
+              t(
+                "cosmeticSearch",
+                "Skin, emote, back bling, CID_, EID_ or BID_..."
+              )
+            )}"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+          />
+
+          <button
+            id="cosmeticBtn"
+            class="tool-button primary"
+            type="button"
+          >${escapeHtml(t("search", "Search"))}</button>
+        </div>
+
+        <div class="tool-subtabs fnaa-cosmetic-filters-v101">
+          <button class="tool-subtab active" type="button" data-cosmetic-filter="all">All</button>
+          <button class="tool-subtab" type="button" data-cosmetic-filter="outfit">Outfits</button>
+          <button class="tool-subtab" type="button" data-cosmetic-filter="emote">Emotes</button>
+          <button class="tool-subtab" type="button" data-cosmetic-filter="backpack">Back Blings</button>
+        </div>
+
+        <div
+          id="cosmeticStatus"
+          class="tool-empty"
+        >Search for a cosmetic.</div>
+
+        <div
+          id="cosmeticGrid"
+          class="cosmetic-grid"
+        ></div>
+
+        <div class="tool-actions">
+          <button
+            id="cosmeticMore"
+            class="tool-button"
+            type="button"
+            hidden
+          >${escapeHtml(t("loadMore", "Load more"))}</button>
+        </div>
+      </div>`;
+
+    const input =
+      content.querySelector(
+        "#cosmeticSearch"
+      );
+
+    const status =
+      content.querySelector(
+        "#cosmeticStatus"
+      );
+
+    const searchButton =
+      content.querySelector(
+        "#cosmeticBtn"
+      );
+
+    let searchRunning = false;
+
+    const run = async () => {
+      const query =
+        input.value.trim();
+
+      if (!query || searchRunning) {
+        if (!query) {
+          status.hidden = false;
+          status.textContent =
+            "Type a cosmetic name or ID first.";
+        }
+
+        return;
+      }
+
+      status.hidden = false;
+      status.textContent =
+        "Searching...";
+
+      searchRunning = true;
+      searchButton.disabled = true;
+
+      try {
+        cosmeticResults =
+          await searchCosmeticApi(
+            query
+          );
+
+        cosmeticShown = 0;
+        renderCosmeticApiPage(true);
+      } catch (error) {
+        cosmeticResults = [];
+        cosmeticShown = 0;
+
+        status.textContent =
+          error?.name ===
+            "AbortError"
+            ? "Cosmetic search timed out. Try again."
+            : error?.message ||
+              "Cosmetic search failed.";
+
+        content.querySelector(
+          "#cosmeticGrid"
+        ).replaceChildren();
+
+        content.querySelector(
+          "#cosmeticMore"
+        ).hidden = true;
+      } finally {
+        searchRunning = false;
+        searchButton.disabled = false;
+      }
+    };
+
+    searchButton.addEventListener(
+      "click",
+      run
+    );
+
+    input.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          run();
+        }
+      }
+    );
+
+    content
+      .querySelector("#cosmeticMore")
+      .addEventListener(
+        "click",
+        () =>
+          renderCosmeticApiPage(
+            false
+          )
+      );
+
+    for (
+      const button of
+      content.querySelectorAll(
+        "[data-cosmetic-filter]"
+      )
+    ) {
+      button.addEventListener(
+        "click",
+        () => {
+          cosmeticFilter =
+            button.dataset
+              .cosmeticFilter ||
+            "all";
+
+          for (
+            const item of
+            content.querySelectorAll(
+              "[data-cosmetic-filter]"
+            )
+          ) {
+            item.classList.toggle(
+              "active",
+              item === button
+            );
+          }
+
+          cosmeticShown = 0;
+          renderCosmeticApiPage(true);
+        }
+      );
+    }
+  }
+
+  async function searchCosmeticApi(
+    query
+  ) {
+    const params =
+      new URLSearchParams();
+
+    const looksLikeId =
+      /^(?:CID_|EID_|BID_|Pickaxe_|Glider_|Wrap_|MusicPack_|LSID_|Emoji_|Spray_|SparksAura_)/i
+        .test(query);
+
+    params.set(
+      looksLikeId
+        ? "id"
+        : "name",
+      query
+    );
+
+    params.set(
+      "matchMethod",
+      "contains"
+    );
+
+    params.set(
+      "language",
+      "en"
+    );
+
+    params.set(
+      "responseFlags",
+      "7"
+    );
+
+    const response =
+      await fetchWithTimeout(
+        `${FORTNITE_API}/search/all?${params}`,
+        {
+          cache: "force-cache"
+        },
+        14_000
+      );
+
+    const payload =
+      await response
+        .json()
+        .catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(
+        payload?.error ||
+        payload?.message ||
+        `Cosmetic API returned ${response.status}`
+      );
+    }
+
+    if (Array.isArray(payload?.data)) {
+      return payload.data;
+    }
+
+    return payload?.data
+      ? [payload.data]
+      : [];
+  }
+
+  function cosmeticApiType(item) {
+    return String(
+      item?.type?.value ||
+      item?.type?.displayValue ||
+      item?.backendType ||
+      ""
+    ).toLowerCase();
+  }
+
+  function cosmeticApiMatchesFilter(
+    item,
+    filter
+  ) {
+    if (
+      !filter ||
+      filter === "all"
+    ) {
+      return true;
+    }
+
+    const type =
+      cosmeticApiType(item);
+
+    if (filter === "outfit") {
+      return (
+        type.includes("outfit") ||
+        type.includes("character") ||
+        String(item?.id || "")
+          .toLowerCase()
+          .startsWith("cid_")
+      );
+    }
+
+    if (filter === "emote") {
+      return (
+        type.includes("emote") ||
+        String(item?.id || "")
+          .toLowerCase()
+          .startsWith("eid_")
+      );
+    }
+
+    if (filter === "backpack") {
+      return (
+        type.includes("backpack") ||
+        type.includes("back bling") ||
+        String(item?.id || "")
+          .toLowerCase()
+          .startsWith("bid_")
+      );
+    }
+
+    return type.includes(filter);
+  }
+
+  function cosmeticApiImage(item) {
+    const images =
+      item?.images || {};
+
+    return (
+      images.icon ||
+      images.smallIcon ||
+      images.featured ||
+      images.other?.background ||
+      images.other?.coverart ||
+      ""
+    );
+  }
+
+  function renderCosmeticApiPage(
+    reset
+  ) {
+    const grid =
+      content.querySelector(
+        "#cosmeticGrid"
+      );
+
+    const more =
+      content.querySelector(
+        "#cosmeticMore"
+      );
+
+    const status =
+      content.querySelector(
+        "#cosmeticStatus"
+      );
+
+    if (!grid || !more || !status) {
+      return;
+    }
+
+    const filtered =
+      cosmeticResults.filter(
+        (item) =>
+          cosmeticApiMatchesFilter(
+            item,
+            cosmeticFilter
+          )
+      );
+
+    if (reset) {
+      cosmeticShown = 0;
+      grid.replaceChildren();
+    }
+
+    const page =
+      filtered.slice(
+        cosmeticShown,
+        cosmeticShown +
+        COSMETIC_PAGE
+      );
+
+    cosmeticShown += page.length;
+
+    grid.insertAdjacentHTML(
+      "beforeend",
+      page
+        .map(cosmeticApiCard)
+        .join("")
+    );
+
+    bindCopyButtons(grid);
+    bindImageFallbacks(grid);
+
+    status.hidden = false;
+    status.textContent =
+      filtered.length
+        ? `${filtered.length} cosmetic${filtered.length === 1 ? "" : "s"} found.`
+        : cosmeticResults.length
+          ? "No cosmetics match this filter."
+          : "No matching cosmetics.";
+
+    more.hidden =
+      cosmeticShown >=
+      filtered.length;
+  }
+
+  function cosmeticApiCard(item) {
+    const name =
+      String(
+        item?.name ||
+        item?.id ||
+        "Cosmetic"
+      );
+
+    const id =
+      String(item?.id || "");
+
+    const type =
+      String(
+        item?.type
+          ?.displayValue ||
+        item?.type?.value ||
+        item?.backendType ||
+        "Cosmetic"
+      );
+
+    const path =
+      String(item?.path || "");
+
+    const image =
+      cosmeticApiImage(item);
+
+    const badge =
+      type
+        .replace(/[^A-Za-z0-9]/g, "")
+        .slice(0, 3)
+        .toUpperCase() ||
+      "COS";
+
+    return `
+      <article
+        class="tool-card cosmetic-card fnaa-cosmetic-v101"
+        data-cosmetic-id="${escapeAttr(id)}"
+      >
+        <div class="tool-card-head fnaa-cosmetic-head-v101">
+          <span class="catalog-image-wrap cosmetic-image-wrap">
+            <img
+              class="tool-card-image cosmetic-img fnaa-cosmetic-img-v101"
+              ${image ? `src="${escapeAttr(image)}"` : ""}
+              alt="${escapeAttr(`${name} cosmetic icon`)}"
+              loading="lazy"
+              decoding="async"
+              data-layered-image
+              data-image-fallbacks="[]"
+              ${image ? "" : "hidden"}
+            />
+
+            <span
+              class="catalog-image-placeholder fnaa-cosmetic-placeholder-v101"
+              data-image-placeholder
+              ${image ? "hidden" : ""}
+              aria-hidden="true"
+            >${escapeHtml(badge)}</span>
+          </span>
+
+          <div class="fnaa-cosmetic-meta-v101">
+            <div class="tool-card-title">
+              ${escapeHtml(name)}
+            </div>
+
+            <div class="tool-note">
+              ${escapeHtml(type)}
+            </div>
+
+            ${id
+              ? `<code class="fnaa-cosmetic-id-v101">${escapeHtml(id)}</code>`
+              : ""}
+          </div>
+        </div>
+
+        ${id
+          ? pathRow("ID", id)
+          : ""}
+
+        ${path
+          ? pathRow("PATH", path)
+          : ""}
+      </article>`;
+  }
+
   // ---------------------------------------------------------------------------
   // Shared helpers
   // ---------------------------------------------------------------------------
@@ -3003,6 +4578,11 @@
       "Island";
 
     const rows = [];
+
+    const images =
+      catalogImageCandidates(
+        item
+      );
 
     for (const key of [
       "id",
@@ -3031,8 +4611,18 @@
 
     return `
       <article class="tool-card">
-        <div class="tool-card-title">
-          ${escapeHtml(title)}
+        <div class="tool-card-head">
+          ${layeredImageMarkup(
+            images,
+            title,
+            "island-image"
+          )}
+
+          <div style="min-width:0;flex:1">
+            <div class="tool-card-title">
+              ${escapeHtml(title)}
+            </div>
+          </div>
         </div>
 
         ${rows.join("")}
@@ -3243,11 +4833,48 @@
       clearInterval(timer);
   }
 
-  async function fetchJson(url) {
-    const response =
-      await fetch(
+  async function fetchWithTimeout(
+    url,
+    options = {},
+    timeoutMs = 16_000
+  ) {
+    const controller =
+      new AbortController();
+
+    const timer =
+      setTimeout(
+        () => controller.abort(),
+        Math.max(
+          1_000,
+          Number(timeoutMs) ||
+          16_000
+        )
+      );
+
+    try {
+      return await fetch(
         url,
-        { cache: "force-cache" }
+        {
+          ...options,
+          signal:
+            controller.signal
+        }
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function fetchJson(
+    url,
+    timeoutMs =
+      STATIC_DATA_TIMEOUT_MS
+  ) {
+    const response =
+      await fetchWithTimeout(
+        url,
+        { cache: "force-cache" },
+        timeoutMs
       );
 
     if (!response.ok) {
@@ -3292,13 +4919,14 @@
     }
 
     const response =
-      await fetch(
+      await fetchWithTimeout(
         `${API_ENDPOINT}${route}?path=${encodeURIComponent(path)}`,
         {
           headers: {
             "X-FNAA-Client": "web-v1"
           }
-        }
+        },
+        28_000
       );
 
     if (!response.ok) {
@@ -3394,13 +5022,34 @@
     return escapeHtml(value);
   }
 
+  const warmCatalogs =
+    () =>
+      loadStaticCatalogs()
+        .catch(() => {});
+
+  if (
+    "requestIdleCallback" in
+    window
+  ) {
+    window.requestIdleCallback(
+      warmCatalogs,
+      { timeout: 2_500 }
+    );
+  } else {
+    setTimeout(
+      warmCatalogs,
+      800
+    );
+  }
+
   window.FortniteTools =
     Object.freeze({
-      version: "1.0.0",
+      version: "1.0.3",
       open,
       close,
       formatAssetPath,
       isClassCompatibleAsset,
-      toFilePath
+      toFilePath,
+      findKnownImage
     });
 })();
