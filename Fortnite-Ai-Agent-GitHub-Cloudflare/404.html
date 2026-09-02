@@ -11,11 +11,23 @@
 (() => {
   "use strict";
 
-  const base = "/Fortnite-agent/";
+  const base =
+    "/Fortnite-agent/";
+
+  const authHash =
+    /(?:^#|[&#])or_(?:session|login)=/i
+      .test(location.hash || "");
+
+  // Preserve the SPA route, but never bury the OpenRouter callback fragment
+  // inside sessionStorage. auth.js must see #or_session immediately on boot.
   const current =
     location.pathname +
     location.search +
-    location.hash;
+    (
+      authHash
+        ? ""
+        : location.hash
+    );
 
   try {
     sessionStorage.setItem(
@@ -24,7 +36,14 @@
     );
   } catch {}
 
-  location.replace(base);
+  location.replace(
+    base +
+    (
+      authHash
+        ? location.hash
+        : ""
+    )
+  );
 })();
 </script>
 </body>
