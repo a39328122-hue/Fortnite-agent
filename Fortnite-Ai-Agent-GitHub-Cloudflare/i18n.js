@@ -31,7 +31,7 @@
       ids: "IDs",
       devices: "Devices",
       convert: "Convert",
-      path: "Path",
+      path: "Path Modifier",
       cosmetic: "Cosmetic",
 
       settingsTitle: "Settings",
@@ -130,8 +130,12 @@
       copied: "Copied",
 
       json: "JSON",
+      viewImage: "View Image",
+      hideImage: "Hide Image",
       viewJson: "View JSON",
       hideJson: "Hide JSON",
+      viewReferences: "View References",
+      hideReferences: "Hide References",
       copyJson: "Copy JSON",
 
       jsonUnavailable:
@@ -168,10 +172,10 @@
         "Cosmetic Browser",
 
       cosmeticNote:
-        "Search local Fortnite paths for cosmetic assets.",
+        "Search outfits, emotes and back blings with visible icons.",
 
       cosmeticSearch:
-        "Skin name, CID, character path...",
+        "Skin, emote, back bling, CID_, EID_ or BID_...",
 
       loadMore:
         "Load more",
@@ -204,7 +208,7 @@
       ids: "IDs",
       devices: "Appareils",
       convert: "Convertir",
-      path: "Chemin",
+      path: "Modificateur",
       cosmetic: "Cosmétiques",
 
       settingsTitle: "Paramètres",
@@ -309,8 +313,12 @@
       copied: "Copié",
 
       json: "JSON",
+      viewImage: "Voir l’image",
+      hideImage: "Masquer l’image",
       viewJson: "Voir JSON",
       hideJson: "Masquer JSON",
+      viewReferences: "Voir les références",
+      hideReferences: "Masquer les références",
       copyJson: "Copier JSON",
 
       jsonUnavailable:
@@ -347,10 +355,10 @@
         "Navigateur de cosmétiques",
 
       cosmeticNote:
-        "Recherche les chemins Fortnite locaux des cosmétiques.",
+        "Recherche tenues, emotes et accessoires de dos avec leurs icônes.",
 
       cosmeticSearch:
-        "Nom du skin, CID, chemin character...",
+        "Tenue, emote, accessoire, CID_, EID_ ou BID_...",
 
       loadMore:
         "Afficher plus",
@@ -384,7 +392,7 @@
       ids: "المعرفات",
       devices: "الأجهزة",
       convert: "التحويل",
-      path: "المسار",
+      path: "معدّل المسار",
       cosmetic: "الكوزمتكس",
 
       settingsTitle: "الإعدادات",
@@ -491,8 +499,12 @@
       copied: "تم النسخ",
 
       json: "JSON",
+      viewImage: "عرض الصورة",
+      hideImage: "إخفاء الصورة",
       viewJson: "عرض JSON",
       hideJson: "إخفاء JSON",
+      viewReferences: "عرض المراجع",
+      hideReferences: "إخفاء المراجع",
       copyJson: "نسخ JSON",
 
       jsonUnavailable:
@@ -529,10 +541,10 @@
         "متصفح الكوزمتكس",
 
       cosmeticNote:
-        "ابحث عن مسارات الكوزمتكس داخل قاعدة فورتنايت المحلية.",
+        "ابحث عن السكنات والإيموتات والـBack Blings مع صورها.",
 
       cosmeticSearch:
-        "اسم السكن، CID، character path...",
+        "سكن، إيموت، Back Bling، CID_ أو EID_ أو BID_...",
 
       loadMore:
         "عرض المزيد",
@@ -741,7 +753,7 @@
 
   window.FortniteI18n =
     Object.freeze({
-      version: "1.0.0",
+      version: "1.0.2",
       t,
       apply,
       setLanguage,
