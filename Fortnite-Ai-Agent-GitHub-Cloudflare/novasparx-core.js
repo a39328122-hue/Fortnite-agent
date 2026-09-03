@@ -372,13 +372,53 @@
     return data;
   }
 
+  async function preview(path, options = {}) {
+    if (!API) throw new Error("FNAA API endpoint is not configured.");
+
+    const url = new URL(`${API}/nova/preview`);
+    url.searchParams.set("path", String(path || ""));
+
+    if (options.retry) {
+      url.searchParams.set("retry", String(Date.now()));
+    }
+
+    const { response, data } = await requestJson(
+      url,
+      { ...options, noCache: Boolean(options.retry) }
+    );
+
+    if (!response.ok || data.state !== "ready") {
+      const error = new Error(
+        data.error ||
+        `NovaSparx preview planner returned HTTP ${response.status}.`
+      );
+
+      error.code = data.code || "NOVA_PREVIEW_ERROR";
+      error.details = data;
+      throw error;
+    }
+
+    const kind = String(data.kind || "metadata").toLowerCase();
+
+    return {
+      ...data,
+      kind,
+      manifest:
+        kind === "mesh" && data.mesh
+          ? normalizeManifest(data.mesh, path)
+          : null
+    };
+  }
+
   window.NovaSparx = Object.freeze({
-    version: "1.0.0",
+    version: "1.1.0",
     resolve,
     inspect,
+    preview,
     normalizeManifest,
     cleanPath,
     objectPath,
     textureUrl
   });
 })();
+
