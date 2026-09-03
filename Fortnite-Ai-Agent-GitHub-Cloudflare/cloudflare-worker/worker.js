@@ -2091,7 +2091,7 @@ function safeNovaRoute(
       .trim();
 
   if (
-    !/^\/v1\/(?:health|resolve|inspect|references|texture|warmup|refresh)$/
+    !/^\/v1\/(?:health|resolve|preview|inspect|references|texture|warmup|refresh)$/
       .test(value)
   ) {
     throw new Error(
