@@ -784,10 +784,20 @@
         rendered: false,
         plan
       };
-    } catch {
+    } catch (error) {
       return {
         rendered: false,
-        plan: null
+        error: true,
+        plan: {
+          state: "error",
+          kind: "metadata",
+          source:
+            "preview-endpoint-error",
+          attemptedReferences: [],
+          error:
+            error?.message ||
+            String(error)
+        }
       };
     }
   }
@@ -1054,7 +1064,8 @@
     ui,
     url,
     info,
-    format
+    format,
+    plan = null
   ) {
     ui.image.src = url;
     ui.image.alt =
@@ -1068,9 +1079,16 @@
         "evidence-image";
     }
 
+    const failure =
+      String(
+        plan?.error || ""
+      ).trim();
+
     setMeta(
       ui.meta,
-      `Layer 8 • verified evidence ${format} • no visual details invented`,
+      failure
+        ? `Layer 8 • NovaSparx unavailable: ${failure} • evidence ${format}`
+        : `Layer 8 • verified evidence ${format} • no visual details invented`,
       "partial"
     );
 
@@ -1117,7 +1135,8 @@
           plan
         ),
         info,
-        "image"
+        "image",
+        plan
       );
     }
 
@@ -1354,7 +1373,8 @@
         "data:image/svg"
       )
         ? "image"
-        : "PNG"
+        : "PNG",
+      plan
     );
   }
 
@@ -1753,7 +1773,10 @@
 
       // 6) Compatibility with an older NovaSparx deployment that can resolve
       // the requested mesh but does not expose /v1/preview yet.
-      if (!universal.plan) {
+      if (
+        !universal.plan ||
+        universal.error
+      ) {
         try {
           await renderNovaMesh(
             clean,
