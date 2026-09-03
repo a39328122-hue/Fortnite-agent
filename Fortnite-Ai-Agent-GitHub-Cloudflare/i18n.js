@@ -166,7 +166,7 @@
         "Show All",
 
       hideUnavailable:
-        "Hide Unavailable",
+        "Hide",
 
       cosmeticBrowser:
         "Cosmetic Browser",
