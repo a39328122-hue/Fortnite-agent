@@ -622,7 +622,7 @@
           "/image",
           path
         ),
-        14_000
+        24_000
       );
 
     if (!ok) {
@@ -1185,7 +1185,7 @@
 
   window.FortnitePreview =
     Object.freeze({
-      version: "1.0.2",
+      version: "1.0.3",
       toggle,
       render: renderPreview,
       release
