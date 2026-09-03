@@ -602,34 +602,6 @@
           return;
         }
 
-        const usesGuestSlowmode =
-          action === "preview" ||
-          action === "references";
-
-        const remaining =
-          usesGuestSlowmode
-            ? guestActionRemaining()
-            : 0;
-
-        if (remaining > 0) {
-          cancelPanelRequest(
-            card,
-            button
-          );
-
-          flashActionCooldown(
-            button,
-            remaining
-          );
-
-          return;
-        }
-
-        if (usesGuestSlowmode) {
-          window.FortniteAgent
-            ?.beginGuestToolSlowmode?.();
-        }
-
         if (action === "preview") {
           await previewPath(
             card,
@@ -5176,3 +5148,4 @@
       findKnownImage
     });
 })();
+
