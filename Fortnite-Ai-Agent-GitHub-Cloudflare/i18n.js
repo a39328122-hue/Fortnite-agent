@@ -32,7 +32,7 @@
       devices: "Devices",
       convert: "Convert",
       path: "Path Modifier",
-      cosmetic: "Cosmetic",
+      cosmetic: "Cosmetics",
 
       settingsTitle: "Settings",
       changeLanguage:
