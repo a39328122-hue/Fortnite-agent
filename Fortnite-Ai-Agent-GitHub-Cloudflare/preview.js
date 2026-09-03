@@ -509,21 +509,15 @@
     return true;
   }
 
-  async function renderNovaMesh(
+  async function renderNovaManifest(
     path,
+    manifest,
     image,
     status,
-    meta
+    meta,
+    sourceLabel =
+      "NovaSparx 1.1"
   ) {
-    if (
-      !window.NovaSparx
-        ?.resolve
-    ) {
-      throw new Error(
-        "NovaSparx resolver is not loaded."
-      );
-    }
-
     if (
       !window.NovaSparxRenderer
         ?.render
@@ -535,21 +529,7 @@
 
     setStatus(
       status,
-      "NovaSparx: resolving geometry and verified materials…"
-    );
-
-    const manifest =
-      await window.NovaSparx
-        .resolve(
-          path,
-          {
-            preferHQ: true
-          }
-        );
-
-    setStatus(
-      status,
-      "NovaSparx: rendering preview…"
+      "NovaSparx: rendering CUE4Parse geometry to PNG…"
     );
 
     const result =
@@ -569,6 +549,8 @@
     );
 
     image.src = url;
+    image.alt =
+      `${assetName(path)} 3D preview`;
     image.hidden = false;
 
     status.hidden = true;
@@ -587,12 +569,12 @@
               ? "Textured + normal map"
               : "Textured"
           )
-        : "Geometry";
+        : "Neutral 3D geometry";
 
     setMeta(
       meta,
       (
-        `NovaSparx 1.0 • ${quality} • ` +
+        `${sourceLabel} • ${quality} • ` +
         `material fidelity: ${fidelity} • ` +
         `${result.width}×${result.height} • ` +
         `${Number(
@@ -603,6 +585,46 @@
         ).toLocaleString()} triangles`
       ),
       fidelity
+    );
+
+    return result;
+  }
+
+  async function renderNovaMesh(
+    path,
+    image,
+    status,
+    meta
+  ) {
+    if (
+      !window.NovaSparx
+        ?.resolve
+    ) {
+      throw new Error(
+        "NovaSparx resolver is not loaded."
+      );
+    }
+
+    setStatus(
+      status,
+      "NovaSparx: resolving geometry and verified materials…"
+    );
+
+    const manifest =
+      await window.NovaSparx
+        .resolve(
+          path,
+          {
+            preferHQ: true
+          }
+        );
+
+    return renderNovaManifest(
+      path,
+      manifest,
+      image,
+      status,
+      meta
     );
   }
 
@@ -688,6 +710,654 @@
     return true;
   }
 
+  async function tryUniversalPreview(
+    path,
+    ui
+  ) {
+    if (
+      !window.NovaSparx
+        ?.preview
+    ) {
+      return {
+        rendered: false,
+        plan: null
+      };
+    }
+
+    setStatus(
+      ui.status,
+      "NovaSparx Layer 8: following verified CUE4Parse visual references…"
+    );
+
+    try {
+      const plan =
+        await window.NovaSparx
+          .preview(path);
+
+      if (
+        plan?.kind ===
+          "texture" &&
+        plan.previewPath
+      ) {
+        const rendered =
+          await tryTextureDecode(
+            plan.previewPath,
+            ui,
+            (
+              "Layer 8 • CUE4Parse referenced texture" +
+              (
+                plan.textureWidth &&
+                plan.textureHeight
+                  ? ` • ${plan.textureWidth}×${plan.textureHeight}`
+                  : ""
+              )
+            )
+          );
+
+        return {
+          rendered,
+          plan
+        };
+      }
+
+      if (
+        plan?.kind ===
+          "mesh" &&
+        plan.manifest
+      ) {
+        await renderNovaManifest(
+          path,
+          plan.manifest,
+          ui.image,
+          ui.status,
+          ui.meta,
+          "Layer 8 • CUE4Parse referenced model"
+        );
+
+        return {
+          rendered: true,
+          plan
+        };
+      }
+
+      return {
+        rendered: false,
+        plan
+      };
+    } catch {
+      return {
+        rendered: false,
+        plan: null
+      };
+    }
+  }
+
+  function evidenceColor(
+    info
+  ) {
+    const material =
+      firstMaterial(info);
+
+    const value =
+      material?.baseColor ||
+      material?.BaseColor;
+
+    if (
+      !Array.isArray(value) ||
+      value.length < 3
+    ) {
+      return "rgb(79, 149, 255)";
+    }
+
+    const channels =
+      value.slice(0, 3)
+        .map(
+          (channel) =>
+            Math.round(
+              Math.max(
+                0,
+                Math.min(
+                  1,
+                  Number(channel) || 0
+                )
+              ) * 255
+            )
+        );
+
+    return `rgb(${channels.join(", ")})`;
+  }
+
+  function roundedRect(
+    context,
+    x,
+    y,
+    width,
+    height,
+    radius
+  ) {
+    const r =
+      Math.min(
+        radius,
+        width / 2,
+        height / 2
+      );
+
+    context.beginPath();
+    context.moveTo(x + r, y);
+    context.lineTo(x + width - r, y);
+    context.quadraticCurveTo(
+      x + width,
+      y,
+      x + width,
+      y + r
+    );
+    context.lineTo(
+      x + width,
+      y + height - r
+    );
+    context.quadraticCurveTo(
+      x + width,
+      y + height,
+      x + width - r,
+      y + height
+    );
+    context.lineTo(x + r, y + height);
+    context.quadraticCurveTo(
+      x,
+      y + height,
+      x,
+      y + height - r
+    );
+    context.lineTo(x, y + r);
+    context.quadraticCurveTo(
+      x,
+      y,
+      x + r,
+      y
+    );
+    context.closePath();
+  }
+
+  function drawWrappedText(
+    context,
+    text,
+    x,
+    y,
+    maxWidth,
+    lineHeight,
+    maxLines = 3
+  ) {
+    const words =
+      String(text || "")
+        .split(/\s+/)
+        .filter(Boolean);
+
+    const lines = [];
+    let line = "";
+
+    for (const word of words) {
+      const candidate =
+        line
+          ? `${line} ${word}`
+          : word;
+
+      if (
+        context.measureText(
+          candidate
+        ).width > maxWidth &&
+        line
+      ) {
+        lines.push(line);
+        line = word;
+
+        if (
+          lines.length >=
+          maxLines
+        ) {
+          break;
+        }
+      } else {
+        line = candidate;
+      }
+    }
+
+    if (
+      line &&
+      lines.length < maxLines
+    ) {
+      lines.push(line);
+    }
+
+    lines.forEach(
+      (item, index) => {
+        const final =
+          index === maxLines - 1 &&
+          words.join(" ").length >
+            lines.join(" ").length
+            ? `${item.replace(/[.\s]+$/, "")}…`
+            : item;
+
+        context.fillText(
+          final,
+          x,
+          y + index * lineHeight
+        );
+      }
+    );
+
+    return y +
+      lines.length * lineHeight;
+  }
+
+  function canvasPng(
+    canvas
+  ) {
+    return new Promise(
+      (resolve, reject) => {
+        canvas.toBlob(
+          (blob) =>
+            blob
+              ? resolve(blob)
+              : reject(
+                  new Error(
+                    "Evidence PNG encoding failed."
+                  )
+                ),
+          "image/png"
+        );
+      }
+    );
+  }
+
+  function xmlEscape(
+    value
+  ) {
+    return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+  }
+
+  function evidenceSvgUrl(
+    path,
+    info,
+    plan
+  ) {
+    const name =
+      xmlEscape(assetName(path));
+
+    const kind =
+      xmlEscape(
+        readableAssetKind(
+          info,
+          path
+        ).toUpperCase()
+      );
+
+    const safePath =
+      xmlEscape(path);
+
+    const references =
+      Array.isArray(
+        info?.references
+      )
+        ? info.references
+        : Array.isArray(
+            info?.References
+          )
+          ? info.References
+          : [];
+
+    const attempted =
+      Array.isArray(
+        plan?.attemptedReferences
+      )
+        ? plan.attemptedReferences
+          .length
+        : 0;
+
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+        <defs>
+          <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#07101f"/>
+            <stop offset="0.55" stop-color="#111d35"/>
+            <stop offset="1" stop-color="#071427"/>
+          </linearGradient>
+        </defs>
+        <rect width="1024" height="1024" fill="url(#bg)"/>
+        <rect width="18" height="1024" fill="#45d6ff"/>
+        <rect x="64" y="64" width="896" height="896" rx="42" fill="#ffffff" opacity="0.06"/>
+        <g font-family="system-ui,Segoe UI,sans-serif">
+          <text x="112" y="136" fill="#45d6ff" font-size="27" font-weight="700">NOVASPARX • LAYER 8</text>
+          <text x="112" y="238" fill="#f5f8ff" font-size="54" font-weight="800">${name}</text>
+          <text x="112" y="310" fill="#b9c8e7" font-size="31" font-weight="600">${kind}</text>
+          <rect x="104" y="360" width="816" height="218" rx="28" fill="#050b18" opacity="0.62"/>
+          <text x="142" y="430" fill="#dce7ff" font-size="23">${safePath}</text>
+          <text x="154" y="742" fill="#dce7ff" font-size="25" font-weight="600">${references.length} verified references</text>
+          <text x="154" y="796" fill="#dce7ff" font-size="25" font-weight="600">${attempted} visual candidates checked</text>
+          <text x="112" y="920" fill="#8495ba" font-size="22">VERIFIED METADATA IMAGE • NOT A VISUAL RECONSTRUCTION</text>
+        </g>
+      </svg>`;
+
+    return (
+      "data:image/svg+xml;charset=utf-8," +
+      encodeURIComponent(svg)
+    );
+  }
+
+  function showEvidenceImage(
+    path,
+    name,
+    ui,
+    url,
+    info,
+    format
+  ) {
+    ui.image.src = url;
+    ui.image.alt =
+      `${name} verified metadata preview`;
+    ui.image.hidden = false;
+    ui.status.hidden = true;
+
+    if (ui.stage) {
+      ui.stage.dataset
+        .previewState =
+        "evidence-image";
+    }
+
+    setMeta(
+      ui.meta,
+      `Layer 8 • verified evidence ${format} • no visual details invented`,
+      "partial"
+    );
+
+    return {
+      state: "ready",
+      kind: "evidence-image",
+      inspection: info || null
+    };
+  }
+
+  async function renderEvidenceImage(
+    path,
+    info,
+    ui,
+    plan = null
+  ) {
+    const canvas =
+      document.createElement(
+        "canvas"
+      );
+
+    canvas.width = 1024;
+    canvas.height = 1024;
+
+    const context =
+      canvas.getContext(
+        "2d",
+        { alpha: false }
+      );
+
+    const name =
+      assetName(path);
+
+    if (!context) {
+      release(path);
+
+      return showEvidenceImage(
+        path,
+        name,
+        ui,
+        evidenceSvgUrl(
+          path,
+          info,
+          plan
+        ),
+        info,
+        "image"
+      );
+    }
+
+    const kind =
+      readableAssetKind(
+        info,
+        path
+      );
+
+    const references =
+      Array.isArray(
+        info?.references
+      )
+        ? info.references
+        : Array.isArray(
+            info?.References
+          )
+          ? info.References
+          : [];
+
+    const fidelity =
+      materialFidelity(
+        info
+      );
+
+    const accent =
+      evidenceColor(info);
+
+    const background =
+      context.createLinearGradient(
+        0,
+        0,
+        1024,
+        1024
+      );
+
+    background.addColorStop(
+      0,
+      "#07101f"
+    );
+    background.addColorStop(
+      0.55,
+      "#111d35"
+    );
+    background.addColorStop(
+      1,
+      "#071427"
+    );
+
+    context.fillStyle =
+      background;
+    context.fillRect(
+      0,
+      0,
+      1024,
+      1024
+    );
+
+    context.fillStyle =
+      accent;
+    context.fillRect(
+      0,
+      0,
+      18,
+      1024
+    );
+
+    context.fillStyle =
+      "rgba(255,255,255,0.06)";
+    roundedRect(
+      context,
+      64,
+      64,
+      896,
+      896,
+      42
+    );
+    context.fill();
+
+    context.fillStyle =
+      accent;
+    context.font =
+      "700 27px system-ui, sans-serif";
+    context.fillText(
+      "NOVASPARX • LAYER 8",
+      112,
+      136
+    );
+
+    context.fillStyle =
+      "#f5f8ff";
+    context.font =
+      "800 58px system-ui, sans-serif";
+
+    let y =
+      drawWrappedText(
+        context,
+        name,
+        112,
+        232,
+        800,
+        70,
+        3
+      );
+
+    y += 34;
+    context.fillStyle =
+      "#b9c8e7";
+    context.font =
+      "600 31px system-ui, sans-serif";
+    context.fillText(
+      kind.toUpperCase(),
+      112,
+      y
+    );
+
+    y += 70;
+    context.fillStyle =
+      "rgba(5, 11, 24, 0.62)";
+    roundedRect(
+      context,
+      104,
+      y,
+      816,
+      218,
+      28
+    );
+    context.fill();
+
+    context.fillStyle =
+      "#dce7ff";
+    context.font =
+      "500 25px system-ui, sans-serif";
+
+    drawWrappedText(
+      context,
+      String(path || ""),
+      142,
+      y + 58,
+      740,
+      36,
+      4
+    );
+
+    const facts = [
+      `${references.length} verified reference${references.length === 1 ? "" : "s"}`,
+      fidelity !== "unknown"
+        ? `material fidelity: ${fidelity}`
+        : "material fidelity: unavailable",
+      plan?.attemptedReferences?.length
+        ? `${plan.attemptedReferences.length} visual candidate${plan.attemptedReferences.length === 1 ? "" : "s"} checked`
+        : "no deterministic visual candidate"
+    ];
+
+    context.font =
+      "600 25px system-ui, sans-serif";
+
+    facts.forEach(
+      (fact, index) => {
+        const top =
+          742 + index * 54;
+
+        context.fillStyle =
+          accent;
+        context.beginPath();
+        context.arc(
+          125,
+          top - 8,
+          7,
+          0,
+          Math.PI * 2
+        );
+        context.fill();
+
+        context.fillStyle =
+          "#dce7ff";
+        context.fillText(
+          fact,
+          154,
+          top
+        );
+      }
+    );
+
+    context.fillStyle =
+      "#8495ba";
+    context.font =
+      "500 22px system-ui, sans-serif";
+    context.fillText(
+      "VERIFIED METADATA PNG • NOT A VISUAL RECONSTRUCTION",
+      112,
+      920
+    );
+
+    release(path);
+
+    let url;
+
+    try {
+      const blob =
+        await canvasPng(
+          canvas
+        );
+
+      url =
+        URL.createObjectURL(blob);
+
+      objectUrls.set(
+        path,
+        url
+      );
+    } catch {
+      try {
+        url =
+          canvas.toDataURL(
+            "image/png"
+          );
+      } catch {
+        url = evidenceSvgUrl(
+          path,
+          info,
+          plan
+        );
+      }
+    }
+
+    return showEvidenceImage(
+      path,
+      name,
+      ui,
+      url,
+      info,
+      url.startsWith(
+        "data:image/svg"
+      )
+        ? "image"
+        : "PNG"
+    );
+  }
+
   async function renderMaterial(
     path,
     info,
@@ -720,59 +1390,7 @@
       return true;
     }
 
-    setStatus(
-      ui.status,
-      (
-        "This material does not have a deterministic 2D texture preview yet. " +
-        "Use Description or References for its verified material data."
-      ),
-      "partial"
-    );
-
-    setMeta(
-      ui.meta,
-      fidelity !== "unknown"
-        ? `Material fidelity: ${fidelity}`
-        : "",
-      fidelity
-    );
-
-    return true;
-  }
-
-  function renderVfxInfo(
-    info,
-    ui
-  ) {
-    const refs =
-      Array.isArray(
-        info?.references
-      )
-        ? info.references.length
-        : Array.isArray(
-            info?.References
-          )
-          ? info.References.length
-          : 0;
-
-    setStatus(
-      ui.status,
-      (
-        "This VFX asset does not have a deterministic still-image renderer yet. " +
-        "Use Description to inspect verified emitters, materials and references."
-      ),
-      "metadata"
-    );
-
-    if (refs) {
-      setMeta(
-        ui.meta,
-        `${refs} verified reference${refs === 1 ? "" : "s"} available`,
-        "partial"
-      );
-    }
-
-    return true;
+    return false;
   }
 
   function readableAssetKind(
@@ -857,64 +1475,6 @@
       file.split(".")[0] ||
       "Unknown asset"
     ).replace(/_C$/i, "");
-  }
-
-  function renderDescriptiveFallback(
-    path,
-    info,
-    ui,
-    reason = ""
-  ) {
-    ui.image.hidden = true;
-    ui.image.removeAttribute(
-      "src"
-    );
-
-    if (ui.stage) {
-      ui.stage.dataset
-        .previewState =
-        "description";
-    }
-
-    const name =
-      assetName(path);
-
-    const kind =
-      readableAssetKind(
-        info,
-        path
-      );
-
-    setStatus(
-      ui.status,
-      (
-        `No verified image is available yet.\n` +
-        `Asset: ${name}\n` +
-        `Path indicates: ${kind}.\n` +
-        "Visual details were not guessed; use Description or References for verified data."
-      ),
-      "metadata"
-    );
-
-    const offline =
-      /invalid url|offline|network|fetch|timeout|timed out/i
-        .test(
-          String(reason || "")
-        );
-
-    setMeta(
-      ui.meta,
-      offline
-        ? "Path-only fallback • the live renderer did not respond"
-        : "Path-only fallback • no deterministic image was found",
-      "partial"
-    );
-
-    return {
-      state: "metadata",
-      kind,
-      inspection: info || null
-    };
   }
 
   async function renderPreview(
@@ -1040,33 +1600,80 @@
           "material"
         )
       ) {
-        await renderMaterial(
-          clean,
-          info,
-          ui
-        );
+        if (
+          await renderMaterial(
+            clean,
+            info,
+            ui
+          )
+        ) {
+          return {
+            state: "ready",
+            kind: "material-texture",
+            inspection: info
+          };
+        }
 
-        return {
-          state: "ready",
-          kind: "material",
-          inspection: info
-        };
+        const universal =
+          await tryUniversalPreview(
+            clean,
+            ui
+          );
+
+        if (universal.rendered) {
+          return {
+            state: "ready",
+            kind:
+              universal.plan?.kind ||
+              "universal",
+            inspection:
+              universal.plan
+                ?.inspection ||
+              info
+          };
+        }
+
+        return renderEvidenceImage(
+          clean,
+          universal.plan
+            ?.inspection ||
+            info,
+          ui,
+          universal.plan
+        );
       }
 
       if (
         /(niagara|particle|effect|vfx)/i
           .test(type)
       ) {
-        renderVfxInfo(
-          info,
-          ui
-        );
+        const universal =
+          await tryUniversalPreview(
+            clean,
+            ui
+          );
 
-        return {
-          state: "ready",
-          kind: "vfx",
-          inspection: info
-        };
+        if (universal.rendered) {
+          return {
+            state: "ready",
+            kind:
+              universal.plan?.kind ||
+              "vfx-reference",
+            inspection:
+              universal.plan
+                ?.inspection ||
+              info
+          };
+        }
+
+        return renderEvidenceImage(
+          clean,
+          universal.plan
+            ?.inspection ||
+            info,
+          ui,
+          universal.plan
+        );
       }
 
       if (
@@ -1092,51 +1699,105 @@
             kind: "mesh",
             inspection: info
           };
-        } catch (error) {
-          return renderDescriptiveFallback(
+        } catch {
+          const universal =
+            await tryUniversalPreview(
+              clean,
+              ui
+            );
+
+          if (universal.rendered) {
+            return {
+              state: "ready",
+              kind:
+                universal.plan?.kind ||
+                "referenced-mesh",
+              inspection:
+                universal.plan
+                  ?.inspection ||
+                info
+            };
+          }
+
+          return renderEvidenceImage(
             clean,
-            info,
+            universal.plan
+              ?.inspection ||
+              info,
             ui,
-            error?.message
+            universal.plan
           );
         }
       }
 
-      // 5) Unknown type: make one geometry attempt and then use an honest,
-      // path-labelled fallback. Backend transport messages never leak into UI.
-      try {
-        await renderNovaMesh(
+      // 5) NovaSparx Layer 8 asks CUE4Parse for a verified referenced texture
+      // or 3D model, then turns that result into the PNG shown to the user.
+      const universal =
+        await tryUniversalPreview(
           clean,
-          ui.image,
-          ui.status,
-          ui.meta
+          ui
         );
 
+      if (universal.rendered) {
         return {
           state: "ready",
-          kind: "mesh",
-          inspection: info
+          kind:
+            universal.plan?.kind ||
+            "universal",
+          inspection:
+            universal.plan
+              ?.inspection ||
+            info
         };
-      } catch (error) {
-        return renderDescriptiveFallback(
-          clean,
-          info,
-          ui,
-          error?.message
-        );
       }
+
+      // 6) Compatibility with an older NovaSparx deployment that can resolve
+      // the requested mesh but does not expose /v1/preview yet.
+      if (!universal.plan) {
+        try {
+          await renderNovaMesh(
+            clean,
+            ui.image,
+            ui.status,
+            ui.meta
+          );
+
+          return {
+            state: "ready",
+            kind: "mesh",
+            inspection: info
+          };
+        } catch {}
+      }
+
+      // 7) Every remaining asset receives a deterministic PNG evidence card.
+      // It is explicitly labelled and never pretends to be the Fortnite art.
+      return renderEvidenceImage(
+        clean,
+        universal.plan
+          ?.inspection ||
+          info,
+        ui,
+        universal.plan
+      );
     } catch (error) {
       console.warn(
         "FNAA preview:",
         error
       );
 
-      return renderDescriptiveFallback(
+      return renderEvidenceImage(
         clean,
         null,
         ui,
-        error?.message ||
-        String(error)
+        {
+          source:
+            "path-only-evidence",
+          attemptedReferences: [],
+          error:
+            error?.message ||
+            String(error)
+        }
       );
     } finally {
       if (button) {
@@ -1185,9 +1846,10 @@
 
   window.FortnitePreview =
     Object.freeze({
-      version: "1.0.3",
+      version: "1.1.0",
       toggle,
       render: renderPreview,
       release
     });
 })();
+
