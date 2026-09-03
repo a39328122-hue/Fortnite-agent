@@ -56,6 +56,12 @@
   const knownImageByPath =
     new Map();
 
+  const cosmeticImageById =
+    new Map();
+
+  const cosmeticImagePromiseById =
+    new Map();
+
   const exportJsonCache = new Map();
 
   back.addEventListener("click", close);
@@ -1653,9 +1659,7 @@
       // IDs/devices. Do not let a slow mobile connection time out this layer
       // and fall through to the heavyweight renderer unnecessarily.
       await loadStaticCatalogs();
-    } catch {
-      return "";
-    }
+    } catch {}
 
     for (
       const key of
@@ -1667,7 +1671,126 @@
       if (image) return image;
     }
 
-    return "";
+    return findCosmeticImage(
+      rawPath
+    );
+  }
+
+  function cosmeticIdFromPath(
+    rawPath
+  ) {
+    const clean =
+      unwrapAssetPath(rawPath)
+        .replace(/\\/g, "/")
+        .replace(
+          /\.(?:uasset|uexp|ubulk)$/i,
+          ""
+        )
+        .trim();
+
+    if (!clean) return "";
+
+    const leaf =
+      clean
+        .split("/")
+        .pop()
+        ?.split(".")[0]
+        ?.replace(/_C$/i, "") ||
+      "";
+
+    return /^(?:CID|EID|BID|Pickaxe|Glider|Wrap|MusicPack|LSID|Emoji|Spray|SparksAura)_[A-Za-z0-9_-]+$/i
+      .test(leaf)
+        ? leaf
+        : "";
+  }
+
+  async function findCosmeticImage(
+    rawPath
+  ) {
+    const id =
+      cosmeticIdFromPath(
+        rawPath
+      );
+
+    if (!id) return "";
+
+    const key =
+      id.toLowerCase();
+
+    if (
+      cosmeticImageById.has(
+        key
+      )
+    ) {
+      return (
+        cosmeticImageById.get(
+          key
+        ) || ""
+      );
+    }
+
+    if (
+      cosmeticImagePromiseById.has(
+        key
+      )
+    ) {
+      return cosmeticImagePromiseById
+        .get(key);
+    }
+
+    const pending =
+      (async () => {
+        try {
+          const item =
+            await cosmeticApi(id);
+
+          const image =
+            cosmeticApiImage(
+              item
+            );
+
+          cosmeticImageById.set(
+            key,
+            image || ""
+          );
+
+          if (image) {
+            addKnownImage(
+              rawPath,
+              image
+            );
+
+            addKnownImage(
+              item?.path,
+              image
+            );
+
+            addKnownImage(
+              id,
+              image
+            );
+          }
+
+          return image || "";
+        } catch {
+          cosmeticImageById.set(
+            key,
+            ""
+          );
+
+          return "";
+        } finally {
+          cosmeticImagePromiseById
+            .delete(key);
+        }
+      })();
+
+    cosmeticImagePromiseById.set(
+      key,
+      pending
+    );
+
+    return pending;
   }
 
   async function renderIds(
