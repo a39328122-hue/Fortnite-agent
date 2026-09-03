@@ -1,0 +1,75 @@
+name: FNAA v1 check
+
+on:
+  push:
+    branches:
+      - main
+      - "codex/**"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-static-site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find Fortnite-Ai-Agent-GitHub-Cloudflare -type f -name '*.js' -print0)
+
+      - name: Verify required site files
+        shell: bash
+        run: |
+          set -euo pipefail
+          site='Fortnite-Ai-Agent-GitHub-Cloudflare'
+          required=(
+            'index.html'
+            '404.html'
+            'style.css'
+            'config.js'
+            'auth.js'
+            'novasparx-core.js'
+            'novasparx-renderer.js'
+            'preview.js'
+            'tools.js'
+            'app.js'
+          )
+
+          for file in "${required[@]}"; do
+            test -s "$site/$file" || {
+              echo "Missing or empty required file: $site/$file" >&2
+              exit 1
+            }
+          done
+
+      - name: Verify local page assets
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const site = 'Fortnite-Ai-Agent-GitHub-Cloudflare';
+          const html = fs.readFileSync(path.join(site, 'index.html'), 'utf8');
+          const references = [...html.matchAll(/(?:src|href)="([^"#?]+)"/g)]
+            .map((match) => match[1])
+            .filter((value) => !/^(?:https?:|data:|mailto:|tel:|\/)/i.test(value));
+
+          const missing = [...new Set(references)]
+            .filter((value) => !fs.existsSync(path.join(site, value)));
+
+          if (missing.length) {
+            console.error(`Missing local page assets:\n${missing.join('\n')}`);
+            process.exit(1);
+          }
+          NODE
