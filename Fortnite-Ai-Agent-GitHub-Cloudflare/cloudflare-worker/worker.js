@@ -2622,6 +2622,9 @@ async function handleNovaProxy(
     "/nova/resolve":
       "/v1/resolve",
 
+    "/nova/preview":
+      "/v1/preview",
+
     "/nova/inspect":
       "/v1/inspect",
 
@@ -2909,6 +2912,38 @@ function addUnique(
   list.push(clean);
 }
 
+function dillyPackagePath(
+  rawValue
+) {
+  let value =
+    String(rawValue || "")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(
+        /\.(?:uasset|uexp|ubulk)$/i,
+        ""
+      );
+
+  const slash =
+    value.lastIndexOf("/");
+
+  const objectDot =
+    value.indexOf(
+      ".",
+      slash + 1
+    );
+
+  if (objectDot > slash) {
+    value =
+      value.slice(
+        0,
+        objectDot
+      );
+  }
+
+  return value;
+}
+
 function dillyPathCandidates(
   rawValue
 ) {
@@ -2926,10 +2961,7 @@ function dillyPathCandidates(
     new Set();
 
   const clean =
-    raw.replace(
-      /\.(?:uasset|uexp|ubulk)$/i,
-      ""
-    );
+    dillyPackagePath(raw);
 
   const pushForms = (
     base
@@ -2984,6 +3016,12 @@ function dillyPathCandidates(
         output,
         seen,
         `${objectBase}.${name}`
+      );
+
+      addUnique(
+        output,
+        seen,
+        `${objectBase}.${name}_C`
       );
     }
   };
@@ -3390,7 +3428,7 @@ async function fetchDillyImage(
           "image/png,image/webp,image/*;q=0.9,application/json;q=0.3,*/*;q=0.1"
       }
     },
-    8_000
+    6_000
   );
 }
 
@@ -3399,12 +3437,12 @@ async function fetchDillyJson(
 ) {
   const attempts = [
     {
-      pathKey: "Path",
-      rawKey: "Raw"
-    },
-    {
       pathKey: "path",
       rawKey: "raw"
+    },
+    {
+      pathKey: "Path",
+      rawKey: "Raw"
     }
   ];
 
@@ -3494,6 +3532,9 @@ async function tryDillyImageCandidates(
   candidates
 ) {
   const attempts = [];
+  const queued = [];
+  const seen =
+    new Set();
 
   for (
     const raw of candidates
@@ -3504,59 +3545,103 @@ async function tryDillyImageCandidates(
         raw
       )
     ) {
-      attempts.push(
-        candidate
-      );
+      const key =
+        candidate.toLowerCase();
 
-      try {
-        const response =
-          await fetchDillyImage(
-            candidate
-          );
-
-        const type =
-          String(
-            response.headers
-              .get(
-                "content-type"
-              ) || ""
-          ).toLowerCase();
-
-        if (
-          response.ok &&
-          type.startsWith(
-            "image/"
-          )
-        ) {
-          return {
-            state: "ready",
-            response,
-            contentType: type,
-            resolvedPath:
-              candidate,
-            attempts
-          };
-        }
-
-        try {
-          await response.body
-            ?.cancel();
-        } catch {}
-      } catch {
-        // Continue through deterministic candidates.
+      if (!seen.has(key)) {
+        seen.add(key);
+        queued.push(candidate);
       }
 
-      if (
-        attempts.length >= 20
-      ) {
+      if (queued.length >= 20) {
         break;
       }
     }
 
-    if (
-      attempts.length >= 20
-    ) {
+    if (queued.length >= 20) {
       break;
+    }
+  }
+
+  for (
+    let offset = 0;
+    offset < queued.length;
+    offset += 4
+  ) {
+    const batch =
+      queued.slice(
+        offset,
+        offset + 4
+      );
+
+    attempts.push(...batch);
+
+    const results =
+      await Promise.all(
+        batch.map(
+          async (candidate) => {
+            try {
+              const response =
+                await fetchDillyImage(
+                  candidate
+                );
+
+              const type =
+                String(
+                  response.headers
+                    .get(
+                      "content-type"
+                    ) || ""
+                ).toLowerCase();
+
+              if (
+                response.ok &&
+                type.startsWith(
+                  "image/"
+                )
+              ) {
+                return {
+                  response,
+                  contentType: type,
+                  resolvedPath:
+                    candidate
+                };
+              }
+
+              try {
+                await response.body
+                  ?.cancel();
+              } catch {}
+            } catch {
+              // Another normalized candidate may still resolve.
+            }
+
+            return null;
+          }
+        )
+      );
+
+    const ready =
+      results.find(Boolean);
+
+    if (ready) {
+      for (const result of results) {
+        if (
+          result &&
+          result !== ready
+        ) {
+          try {
+            await result.response
+              .body?.cancel();
+          } catch {}
+        }
+      }
+
+      return {
+        state: "ready",
+        ...ready,
+        attempts
+      };
     }
   }
 
@@ -3590,32 +3675,46 @@ async function resolveDillyImage(
       rawPath
     );
 
+  const jsonResults =
+    await Promise.all(
+      jsonCandidates
+        .slice(0, 3)
+        .map(
+          async (candidate) => ({
+            candidate,
+            data:
+              await fetchDillyJson(
+                candidate
+              )
+          })
+        )
+    );
+
+  const refs = [];
+  const seenRefs =
+    new Set();
+
   for (
-    const candidate of
-    jsonCandidates.slice(
-      0,
-      4
-    )
+    const result of jsonResults
   ) {
-    const data =
-      await fetchDillyJson(
-        candidate
-      );
+    if (!result.data) continue;
 
-    if (!data) {
-      continue;
-    }
-
-    const refs =
+    for (
+      const ref of
       extractImageCandidates(
-        data,
+        result.data,
         rawPath
+      )
+    ) {
+      addUnique(
+        refs,
+        seenRefs,
+        ref
       );
-
-    if (!refs.length) {
-      continue;
     }
+  }
 
+  if (refs.length) {
     const viaJson =
       await tryDillyImageCandidates(
         refs
@@ -5499,3 +5598,4 @@ export default {
     );
   }
 };
+
