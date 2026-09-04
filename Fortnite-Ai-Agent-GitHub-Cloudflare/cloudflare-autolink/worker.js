@@ -32,11 +32,26 @@ function bearerToken(request) {
 }
 
 function authorized(request, env) {
-  const expected = String(env.NOVASPARX_LINK_TOKEN || "").trim();
-  if (!expected) return false;
-
   const supplied = bearerToken(request);
-  return supplied.length === expected.length && supplied === expected;
+
+  if (!supplied) return false;
+
+  const expectedTokens = [
+    env.NOVASPARX_SHARED_TOKEN,
+    env.NOVASPARX_LINK_TOKEN,
+    env.NOVASPARX_SHARED_TOKEN_PREVIOUS,
+    env.NOVASPARX_LINK_TOKEN_PREVIOUS
+  ]
+    .map((value) =>
+      String(value || "").trim()
+    )
+    .filter(Boolean);
+
+  return expectedTokens.some(
+    (expected) =>
+      supplied.length === expected.length &&
+      supplied === expected
+  );
 }
 
 function getStub(env) {
